@@ -521,6 +521,31 @@ class StreamingServerHelper(
                 return
             }
 
+            if (uri == "/openapi.json") {
+                val openApiJson = try {
+                    context.assets.open("openapi.json").bufferedReader().use { it.readText() }
+                } catch (e: Exception) {
+                    null
+                }
+                if (openApiJson == null) {
+                    writer.print("HTTP/1.1 404 Not Found\r\n")
+                    writer.print("Content-Type: text/plain\r\n")
+                    writer.print("Connection: close\r\n\r\n")
+                    writer.print("Not Found\r\n")
+                } else {
+                    val bytes = openApiJson.toByteArray(Charsets.UTF_8)
+                    writer.print("HTTP/1.1 200 OK\r\n")
+                    writer.print("Content-Type: application/json\r\n")
+                    writer.print("Content-Length: ${bytes.size}\r\n")
+                    writer.print("Connection: close\r\n\r\n")
+                    writer.flush()
+                    outputStream.write(bytes)
+                    outputStream.flush()
+                }
+                socket.close()
+                return
+            }
+
             if (uri.startsWith("/audio")) {
                 if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                     writer.print("HTTP/1.1 403 Forbidden\r\n")

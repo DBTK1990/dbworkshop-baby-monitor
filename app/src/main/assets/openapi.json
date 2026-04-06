@@ -1,0 +1,382 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Android IP Camera API",
+    "description": "REST API for the Android IP Camera baby monitor application. All endpoints require HTTP Basic Authentication. The server runs on HTTPS (TLS 1.2/1.3) on port 4444.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "Android IP Camera",
+      "url": "https://github.com/digitallyrefined/android-ip-camera"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://{host}:4444",
+      "description": "Android device camera server",
+      "variables": {
+        "host": {
+          "default": "192.168.1.100",
+          "description": "IP address of the Android device running the app"
+        }
+      }
+    }
+  ],
+  "security": [
+    {
+      "basicAuth": []
+    }
+  ],
+  "paths": {
+    "/": {
+      "get": {
+        "summary": "Control interface or issue a camera command",
+        "description": "Without query parameters, returns the HTML web control interface with current camera settings. With query parameters, executes one or more control commands and returns 'OK'.",
+        "operationId": "getControlInterface",
+        "tags": ["Control"],
+        "parameters": [
+          {
+            "name": "camera",
+            "in": "query",
+            "description": "Switch between back and front camera",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["back", "front"]
+            },
+            "example": "back"
+          },
+          {
+            "name": "rotate",
+            "in": "query",
+            "description": "Rotate the image by 90 degrees (cumulative)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "enum": [90]
+            },
+            "example": 90
+          },
+          {
+            "name": "resolution",
+            "in": "query",
+            "description": "Set camera capture resolution",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["low", "medium", "high"]
+            },
+            "example": "high"
+          },
+          {
+            "name": "zoom",
+            "in": "query",
+            "description": "Set digital zoom factor",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "format": "float",
+              "minimum": 1.0,
+              "maximum": 8.0
+            },
+            "example": 2.5
+          },
+          {
+            "name": "scale",
+            "in": "query",
+            "description": "Set video stream scaling factor",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "format": "float",
+              "minimum": 0.5,
+              "maximum": 2.0
+            },
+            "example": 1.0
+          },
+          {
+            "name": "exposure",
+            "in": "query",
+            "description": "Adjust exposure compensation (EV steps)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": -10,
+              "maximum": 10
+            },
+            "example": 2
+          },
+          {
+            "name": "contrast",
+            "in": "query",
+            "description": "Adjust software contrast (steps of 10)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": -50,
+              "maximum": 50,
+              "multipleOf": 10
+            },
+            "example": 10
+          },
+          {
+            "name": "delay",
+            "in": "query",
+            "description": "Frame delay / rate limiting in milliseconds",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 10,
+              "maximum": 1000
+            },
+            "example": 33
+          },
+          {
+            "name": "torch",
+            "in": "query",
+            "description": "Control the LED flashlight/torch",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["on", "off", "toggle"]
+            },
+            "example": "toggle"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success. Returns HTML web interface when no query params are provided, or plain text 'OK' when a command is executed.",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string",
+                  "description": "HTML control interface with current camera settings"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "example": "OK"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/stream": {
+      "get": {
+        "summary": "Live MJPEG video stream",
+        "description": "Returns a continuous MJPEG (Motion JPEG) stream from the device camera. The connection stays open and frames are delivered as multipart HTTP. Up to 10 simultaneous authenticated clients are supported.",
+        "operationId": "getVideoStream",
+        "tags": ["Media"],
+        "responses": {
+          "200": {
+            "description": "MJPEG video stream. The response is a continuous multipart stream; each part is a JPEG frame.",
+            "headers": {
+              "Cache-Control": {
+                "schema": { "type": "string" },
+                "example": "no-cache, no-store, must-revalidate"
+              },
+              "Connection": {
+                "schema": { "type": "string" },
+                "example": "keep-alive"
+              }
+            },
+            "content": {
+              "multipart/x-mixed-replace": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary",
+                  "description": "Continuous stream of JPEG frames separated by '--frame' boundary. Each part has Content-Type: image/jpeg and Content-Length headers."
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/audio": {
+      "get": {
+        "summary": "Live WAV audio stream",
+        "description": "Returns a continuous live audio stream from the device microphone in WAV format using chunked transfer encoding. Requires microphone permission to be granted on the device. Sample rate: 44100 Hz, Mono, 16-bit PCM.",
+        "operationId": "getAudioStream",
+        "tags": ["Media"],
+        "responses": {
+          "200": {
+            "description": "Chunked WAV audio stream from the device microphone.",
+            "headers": {
+              "Transfer-Encoding": {
+                "schema": { "type": "string" },
+                "example": "chunked"
+              },
+              "Cache-Control": {
+                "schema": { "type": "string" },
+                "example": "no-cache, no-store, must-revalidate"
+              },
+              "Connection": {
+                "schema": { "type": "string" },
+                "example": "keep-alive"
+              }
+            },
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary",
+                  "description": "Chunked WAV audio stream. WAV header is sent first (44 bytes, 44100 Hz / Mono / 16-bit PCM), followed by continuous PCM data chunks."
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Microphone permission not granted on the device.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "example": "Microphone permission not granted."
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "description": "Audio streaming failed due to an internal error.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "example": "Audio streaming failed."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "summary": "OpenAPI specification",
+        "description": "Returns this OpenAPI 3.0 specification document in JSON format.",
+        "operationId": "getOpenApiSpec",
+        "tags": ["Meta"],
+        "security": [
+          {
+            "basicAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OpenAPI specification document",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "OpenAPI 3.0.3 specification"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "basicAuth": {
+        "type": "http",
+        "scheme": "basic",
+        "description": "HTTP Basic Authentication. Username and password are configured in the Android app settings. After 5 failed attempts, the client IP is blocked for 15 minutes."
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "Authentication required or credentials are invalid.",
+        "headers": {
+          "WWW-Authenticate": {
+            "schema": { "type": "string" },
+            "example": "Basic realm=\"Android IP Camera\""
+          }
+        },
+        "content": {
+          "text/plain": {
+            "schema": {
+              "type": "string",
+              "example": "Unauthorized. Check username and password in the app settings."
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Too many failed authentication attempts. The client IP is temporarily blocked.",
+        "headers": {
+          "Retry-After": {
+            "schema": { "type": "integer" },
+            "example": 30,
+            "description": "Number of seconds to wait before retrying"
+          }
+        },
+        "content": {
+          "text/plain": {
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ServiceUnavailable": {
+        "description": "Maximum number of simultaneous clients reached (10 for authenticated, 3 for unauthenticated).",
+        "headers": {
+          "Retry-After": {
+            "schema": { "type": "integer" },
+            "example": 30
+          }
+        },
+        "content": {
+          "text/plain": {
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Media",
+      "description": "Live video and audio streams from the device camera and microphone"
+    },
+    {
+      "name": "Control",
+      "description": "Camera settings and control commands"
+    },
+    {
+      "name": "Meta",
+      "description": "API metadata and documentation"
+    }
+  ]
+}
