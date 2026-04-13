@@ -52,11 +52,15 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
+          # Trim leading/trailing whitespace from secrets to guard against accidental spaces
+          TRIMMED_STORE_PASSWORD="$(printf '%s' "${STORE_PASSWORD}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          TRIMMED_KEY_ALIAS="$(printf '%s' "${KEY_ALIAS}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          TRIMMED_KEY_PASSWORD="$(printf '%s' "${KEY_PASSWORD}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
           cat > signing.properties <<EOF
           storeFile=${{ github.workspace }}/signing-key.jks
-          storePassword=${STORE_PASSWORD}
-          keyAlias=${KEY_ALIAS}
-          keyPassword=${KEY_PASSWORD}
+          storePassword=${TRIMMED_STORE_PASSWORD}
+          keyAlias=${TRIMMED_KEY_ALIAS}
+          keyPassword=${TRIMMED_KEY_PASSWORD}
           EOF
 
       - name: Grant execute permission for gradlew
