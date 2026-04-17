@@ -1,8 +1,11 @@
 package com.github.digitallyrefined.androidipcamera.helpers
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.os.Looper
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
@@ -43,6 +46,12 @@ class WebRtcManager(
     private var audioSource: AudioSource? = null
     private var audioTrack: AudioTrack? = null
     private val peers = ConcurrentHashMap<String, PeerConnection>()
+    private var frameWidth = 0
+    private var frameHeight = 0
+    private var argbBuffer: IntArray? = null
+    private var yPlaneBuffer: ByteArray? = null
+    private var uPlaneBuffer: ByteArray? = null
+    private var vPlaneBuffer: ByteArray? = null
 
     fun initialize() {
         check(Looper.myLooper() == Looper.getMainLooper()) {
@@ -77,8 +86,14 @@ class WebRtcManager(
             mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "false"))
             mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "false"))
         }
-        audioSource = factory!!.createAudioSource(audioConstraints)
-        audioTrack = factory!!.createAudioTrack("a0", audioSource)
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            audioSource = factory!!.createAudioSource(audioConstraints)
+            audioTrack = factory!!.createAudioTrack("a0", audioSource)
+        } else {
+            onLog("RECORD_AUDIO permission missing: creating WebRTC video-only sessions")
+            audioSource = null
+            audioTrack = null
+        }
     }
 
     fun hasPeers(): Boolean = peers.isNotEmpty()
@@ -90,15 +105,24 @@ class WebRtcManager(
         val w = bitmap.width
         val h = bitmap.height
 
-        val argb = IntArray(w * h)
+        if (argbBuffer == null || frameWidth != w || frameHeight != h) {
+            frameWidth = w
+            frameHeight = h
+            argbBuffer = IntArray(w * h)
+            yPlaneBuffer = ByteArray(w * h)
+            uPlaneBuffer = ByteArray(w * h / 4)
+            vPlaneBuffer = ByteArray(w * h / 4)
+        }
+        val argb = argbBuffer ?: return
+        val yPlane = yPlaneBuffer ?: return
+        val uPlane = uPlaneBuffer ?: return
+        val vPlane = vPlaneBuffer ?: return
         bitmap.getPixels(argb, 0, w, 0, 0, w, h)
         bitmap.recycle()
 
         // Convert ARGB to I420
-        val yPlane = ByteArray(w * h)
-        val uPlane = ByteArray(w * h / 4)
-        val vPlane = ByteArray(w * h / 4)
-        var uIdx = 0; var vIdx = 0
+        var uIdx = 0
+        var vIdx = 0
         for (row in 0 until h) {
             for (col in 0 until w) {
                 val pixel = argb[row * w + col]
@@ -129,7 +153,7 @@ class WebRtcManager(
     suspend fun handleOffer(sessionId: String, offerSdp: String): String {
         val f = factory ?: throw IllegalStateException("WebRtcManager not initialized")
         val vt = videoTrack ?: throw IllegalStateException("VideoTrack not initialized")
-        val at = audioTrack ?: throw IllegalStateException("AudioTrack not initialized")
+        val at = audioTrack
 
         val iceServers = listOf(
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer()
@@ -168,30 +192,38 @@ class WebRtcManager(
 
         val pc = f.createPeerConnection(rtcConfig, observer)
             ?: throw IllegalStateException("Failed to create PeerConnection")
-
-        pc.addTransceiver(
-            vt,
-            RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
-        )
-        pc.addTransceiver(
-            at,
-            RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
-        )
-
-        pc.setRemoteDescriptionSuspend(SessionDescription(SessionDescription.Type.OFFER, offerSdp))
-
-        val answer = pc.createAnswerSuspend(MediaConstraints())
-        pc.setLocalDescriptionSuspend(answer)
-
-        // Wait for ICE gathering to complete (2s max on LAN)
-        withTimeoutOrNull(2000L) { iceGatheringDone.await() }
-
         peers[sessionId] = pc
         onPeerCountChanged?.invoke(peers.size)
-        onLog("WebRTC session $sessionId connected (total peers: ${peers.size})")
 
-        return pc.localDescription?.description
-            ?: throw IllegalStateException("No local description after ICE gathering")
+        try {
+            pc.addTransceiver(
+                vt,
+                RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
+            )
+            if (at != null) {
+                pc.addTransceiver(
+                    at,
+                    RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
+                )
+            } else {
+                onLog("WebRTC session $sessionId is video-only (no mic permission)")
+            }
+
+            pc.setRemoteDescriptionSuspend(SessionDescription(SessionDescription.Type.OFFER, offerSdp))
+
+            val answer = pc.createAnswerSuspend(MediaConstraints())
+            pc.setLocalDescriptionSuspend(answer)
+
+            // Wait for ICE gathering to complete (2s max on LAN)
+            withTimeoutOrNull(2000L) { iceGatheringDone.await() }
+
+            onLog("WebRTC session $sessionId connected (total peers: ${peers.size})")
+            return pc.localDescription?.description
+                ?: throw IllegalStateException("No local description after ICE gathering")
+        } catch (e: Exception) {
+            closeSession(sessionId)
+            throw e
+        }
     }
 
     fun closeSession(sessionId: String) {

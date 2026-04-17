@@ -280,41 +280,44 @@
         updateFlashButton();
       }
 
-      muteBtn.onclick = () => {
-        const willUnmute = audioEl.muted;
-        if (willUnmute) {
-          // Preflight check to detect 403 without toggling UI state
-          const controller = new AbortController();
-          fetch('/audio', {
-            method: 'GET',
-            cache: 'no-store',
-            credentials: 'include',
-            signal: controller.signal
-          }).then(res => {
-            if (res && res.status === 403) {
-              alert('Audio is disabled because microphone permission is not granted.');
-              return;
-            }
-            try { controller.abort(); } catch (_) {}
-            if (!audioEl.src) {
-              audioEl.src = '/audio';
-              audioEl.load();
-            }
-            audioEl.muted = false;
-            audioEl.play().catch(() => {});
+      function restoreMjpegAudioControls() {
+        muteBtn.onclick = () => {
+          const willUnmute = audioEl.muted;
+          if (willUnmute) {
+            // Preflight check to detect 403 without toggling UI state
+            const controller = new AbortController();
+            fetch('/audio', {
+              method: 'GET',
+              cache: 'no-store',
+              credentials: 'include',
+              signal: controller.signal
+            }).then(res => {
+              if (res && res.status === 403) {
+                alert('Audio is disabled because microphone permission is not granted.');
+                return;
+              }
+              try { controller.abort(); } catch (_) {}
+              if (!audioEl.src) {
+                audioEl.src = '/audio';
+                audioEl.load();
+              }
+              audioEl.muted = false;
+              audioEl.play().catch(() => {});
+              updateMuteButton();
+            }).catch(() => {
+              // Network or other error: keep muted and do not toggle button
+            });
+          } else {
+            audioEl.muted = true;
+            audioEl.pause();
+            audioEl.removeAttribute('src');
+            audioEl.load();
             updateMuteButton();
-          }).catch(() => {
-            // Network or other error: keep muted and do not toggle button
-          });
-        } else {
-          audioEl.muted = true;
-          audioEl.pause();
-          audioEl.removeAttribute('src');
-          audioEl.load();
-          updateMuteButton();
-        }
-      };
-      updateMuteButton();
+          }
+        };
+        updateMuteButton();
+      }
+      restoreMjpegAudioControls();
 
       if (avDelay && avDelayVal) {
         avDelay.addEventListener('input', () => {
@@ -532,10 +535,11 @@
             iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
             bundlePolicy: 'max-bundle'
           });
+          const currentPc = pc;
           pc.addTransceiver('video', { direction: 'recvonly' });
           pc.addTransceiver('audio', { direction: 'recvonly' });
 
-          pc.ontrack = (e) => {
+          currentPc.ontrack = (e) => {
             if (!e.streams || !e.streams[0]) return;
             rtcVideo.srcObject = e.streams[0];
             rtcVideo.style.display = 'block';
@@ -553,29 +557,27 @@
             };
           };
 
-          pc.oniceconnectionstatechange = () => {
-            if (['disconnected', 'failed', 'closed'].includes(pc.iceConnectionState)) {
+          currentPc.oniceconnectionstatechange = () => {
+            if (pc !== currentPc) return;
+            if (['disconnected', 'failed', 'closed'].includes(currentPc.iceConnectionState)) {
               closeWebRTC();
-              rtcVideo.style.display = 'none';
-              streamCanvas.style.display = '';
-              webrtcActive = false;
               if (!mjpegRunning) startMjpegStream();
             }
           };
 
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
+          const offer = await currentPc.createOffer();
+          await currentPc.setLocalDescription(offer);
 
           // Wait for ICE gathering to finish (LAN: ~50ms, timeout 2s)
           await new Promise(resolve => {
-            if (pc.iceGatheringState === 'complete') { resolve(); return; }
+            if (currentPc.iceGatheringState === 'complete') { resolve(); return; }
             const check = () => {
-              if (pc.iceGatheringState === 'complete') {
-                pc.removeEventListener('icegatheringstatechange', check);
+              if (currentPc.iceGatheringState === 'complete') {
+                currentPc.removeEventListener('icegatheringstatechange', check);
                 resolve();
               }
             };
-            pc.addEventListener('icegatheringstatechange', check);
+            currentPc.addEventListener('icegatheringstatechange', check);
             setTimeout(resolve, 2000);
           });
 
@@ -583,11 +585,11 @@
             method: 'POST',
             credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sdp: pc.localDescription.sdp, type: 'offer' })
+            body: JSON.stringify({ sdp: currentPc.localDescription.sdp, type: 'offer' })
           });
           if (!resp.ok) throw new Error('signaling ' + resp.status);
           const { sdp, type } = await resp.json();
-          await pc.setRemoteDescription(new RTCSessionDescription({ sdp, type }));
+          await currentPc.setRemoteDescription(new RTCSessionDescription({ sdp, type }));
 
         } catch (err) {
           console.warn('WebRTC failed, falling back to MJPEG:', err);
@@ -598,6 +600,10 @@
 
       function closeWebRTC() {
         if (pc) { try { pc.close(); } catch (_) {} pc = null; }
+        rtcVideo.srcObject = null;
+        rtcVideo.style.display = 'none';
+        streamCanvas.style.display = '';
+        restoreMjpegAudioControls();
         webrtcActive = false;
       }
     </script>

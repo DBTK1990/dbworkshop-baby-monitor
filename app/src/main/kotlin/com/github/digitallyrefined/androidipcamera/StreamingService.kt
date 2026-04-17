@@ -39,6 +39,7 @@ import com.github.digitallyrefined.androidipcamera.helpers.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
 import java.net.Inet4Address
@@ -294,7 +295,9 @@ class StreamingService : LifecycleService() {
                     if (certFile.exists()) certFile.delete()
                     generateCertificateAndStart()
                 } else {
-                    initServer()
+                    lifecycleScope.launch {
+                        initServer()
+                    }
                 }
             } else {
                 generateCertificateAndStart()
@@ -325,7 +328,7 @@ class StreamingService : LifecycleService() {
         }
     }
 
-    private fun initServer() {
+    private suspend fun initServer() {
         if (streamingServerHelper == null) {
             // Initialize WebRTC — PeerConnectionFactory requires the main thread
             if (webRtcManager == null) {
@@ -333,7 +336,7 @@ class StreamingService : LifecycleService() {
                     Log.i(TAG, "WebRTC: $msg")
                     onLog?.invoke(msg)
                 }
-                lifecycleScope.launch(Dispatchers.Main) {
+                withContext(Dispatchers.Main) {
                     mgr.initialize()
                 }
                 mgr.onPeerCountChanged = { count ->

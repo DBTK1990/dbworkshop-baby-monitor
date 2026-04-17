@@ -347,7 +347,7 @@ class StreamingServerHelper(
             // Configure socket timeouts for security
             socket.soTimeout = SOCKET_TIMEOUT_MS
 
-            val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
+            val reader = BufferedReader(InputStreamReader(socket.getInputStream(), Charsets.UTF_8))
 
             // Read the request line (e.g., GET /stream HTTP/1.1)
             val requestLine = reader.readLine() ?: return
@@ -547,12 +547,29 @@ class StreamingServerHelper(
                 return
             }
 
+            if (uri == "/webrtc/offer" && requestParts[0] == "OPTIONS") {
+                writer.print("HTTP/1.1 204 No Content\r\n")
+                writer.print("Allow: OPTIONS, POST\r\n")
+                writer.print("Access-Control-Allow-Origin: *\r\n")
+                writer.print("Access-Control-Allow-Methods: POST, OPTIONS\r\n")
+                writer.print("Access-Control-Allow-Headers: Content-Type, Authorization\r\n")
+                writer.print("Connection: close\r\n\r\n")
+                writer.flush()
+                socket.close()
+                return
+            }
+
             // WebRTC signaling: POST /webrtc/offer — browser sends SDP offer, Android replies with SDP answer
-            // No CORS headers needed: the UI is served from this same origin.
             if (uri == "/webrtc/offer" && requestParts[0] == "POST") {
                 val contentLength = headers
                     .find { it.startsWith("Content-Length:", ignoreCase = true) }
                     ?.substringAfter(":")?.trim()?.toIntOrNull() ?: 0
+                if (contentLength <= 0) {
+                    writer.print("HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nMissing or invalid Content-Length")
+                    writer.flush()
+                    socket.close()
+                    return
+                }
                 val bodyChars = CharArray(contentLength)
                 var totalRead = 0
                 while (totalRead < contentLength) {
@@ -560,7 +577,13 @@ class StreamingServerHelper(
                     if (n == -1) break
                     totalRead += n
                 }
-                val body = String(bodyChars)
+                if (totalRead != contentLength) {
+                    writer.print("HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nIncomplete request body")
+                    writer.flush()
+                    socket.close()
+                    return
+                }
+                val body = String(bodyChars, 0, totalRead)
 
                 val offerSdp = try {
                     org.json.JSONObject(body).getString("sdp")
