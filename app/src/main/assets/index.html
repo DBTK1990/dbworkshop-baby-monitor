@@ -169,7 +169,7 @@
 
       <div class='main'>
         <div class='stream-container' id='streamContainer'>
-          <div id="streamModeIndicator" class="stream-mode-indicator">Connecting...</div>
+          <div id="streamModeIndicator" class="stream-mode-indicator"></div>
           <canvas id='streamCanvas'></canvas>
           <audio id="audioEl" preload="none" muted></audio>
         </div>
@@ -250,7 +250,6 @@
       };
 
       function setStreamMode(mode) {
-        if (!streamModeIndicator) return;
         const config = streamModeConfigs[mode] || streamModeConfigs.connecting;
         streamModeIndicator.textContent = config.label;
         streamModeIndicator.style.borderColor = config.borderColor;
