@@ -22,7 +22,6 @@ import org.webrtc.PeerConnection
 import org.webrtc.PeerConnection.IceConnectionState
 import org.webrtc.PeerConnection.IceGatheringState
 import org.webrtc.PeerConnectionFactory
-import org.webrtc.RtpTransceiver
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
 import org.webrtc.VideoFrame
@@ -196,20 +195,13 @@ class WebRtcManager(
         onPeerCountChanged?.invoke(peers.size)
 
         try {
-            pc.addTransceiver(
-                vt,
-                RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
-            )
+            pc.setRemoteDescriptionSuspend(SessionDescription(SessionDescription.Type.OFFER, offerSdp))
+            pc.addTrack(vt)
             if (at != null) {
-                pc.addTransceiver(
-                    at,
-                    RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_ONLY)
-                )
+                pc.addTrack(at)
             } else {
                 onLog("WebRTC session $sessionId is video-only (no mic permission)")
             }
-
-            pc.setRemoteDescriptionSuspend(SessionDescription(SessionDescription.Type.OFFER, offerSdp))
 
             val answer = pc.createAnswerSuspend(MediaConstraints())
             pc.setLocalDescriptionSuspend(answer)
