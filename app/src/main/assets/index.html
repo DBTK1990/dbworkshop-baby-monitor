@@ -169,7 +169,7 @@
 
       <div class='main'>
         <div class='stream-container' id='streamContainer'>
-          <div id="streamModeIndicator" class="stream-mode-indicator">Connecting…</div>
+          <div id="streamModeIndicator" class="stream-mode-indicator">Connecting...</div>
           <canvas id='streamCanvas'></canvas>
           <audio id="audioEl" preload="none" muted></audio>
         </div>
@@ -252,8 +252,11 @@
         } else if (mode === 'mjpeg-fallback') {
           streamModeIndicator.textContent = 'MJPEG fallback';
           streamModeIndicator.style.borderColor = '#f39c12';
+        } else if (mode === 'connecting') {
+          streamModeIndicator.textContent = 'Connecting...';
+          streamModeIndicator.style.borderColor = '#666';
         } else {
-          streamModeIndicator.textContent = 'Connecting…';
+          streamModeIndicator.textContent = 'Connecting...';
           streamModeIndicator.style.borderColor = '#666';
         }
       }
