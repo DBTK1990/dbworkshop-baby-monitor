@@ -280,7 +280,7 @@
         updateFlashButton();
       }
 
-      muteBtn.addEventListener('click', () => {
+      muteBtn.onclick = () => {
         const willUnmute = audioEl.muted;
         if (willUnmute) {
           // Preflight check to detect 403 without toggling UI state
@@ -313,7 +313,7 @@
           audioEl.load();
           updateMuteButton();
         }
-      });
+      };
       updateMuteButton();
 
       if (avDelay && avDelayVal) {

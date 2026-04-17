@@ -33,7 +33,8 @@ jobs:
 
       - name: Build (compile check)
         id: build
-        run: ./gradlew assembleDebug --no-daemon 2>&1 | tee build.log
+        shell: bash
+        run: set -o pipefail && ./gradlew assembleDebug --no-daemon 2>&1 | tee build.log
         continue-on-error: true
 
       - name: Emit build failure annotation
@@ -45,7 +46,8 @@ jobs:
 
       - name: Run Android lint
         id: lint
-        run: ./gradlew lintDebug --no-daemon 2>&1 | tee lint-output.log
+        shell: bash
+        run: set -o pipefail && ./gradlew lintDebug --no-daemon 2>&1 | tee lint-output.log
         continue-on-error: true
 
       - name: Parse lint results and emit annotations

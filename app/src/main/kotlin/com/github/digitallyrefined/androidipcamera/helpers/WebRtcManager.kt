@@ -116,8 +116,6 @@ class WebRtcManager(
             }
         }
 
-        val strideY = w
-        val strideUV = w / 2
         val i420Buffer = JavaI420Buffer.allocate(w, h)
         i420Buffer.dataY.put(yPlane); i420Buffer.dataY.rewind()
         i420Buffer.dataU.put(uPlane); i420Buffer.dataU.rewind()

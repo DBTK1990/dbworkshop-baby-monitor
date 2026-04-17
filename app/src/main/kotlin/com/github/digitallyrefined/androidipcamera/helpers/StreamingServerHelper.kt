@@ -547,25 +547,19 @@ class StreamingServerHelper(
                 return
             }
 
-            // WebRTC CORS preflight
-            if (uri == "/webrtc/offer" && requestParts[0] == "OPTIONS") {
-                writer.print("HTTP/1.1 204 No Content\r\n")
-                writer.print("Access-Control-Allow-Origin: *\r\n")
-                writer.print("Access-Control-Allow-Methods: POST, OPTIONS\r\n")
-                writer.print("Access-Control-Allow-Headers: Authorization, Content-Type\r\n")
-                writer.print("Connection: close\r\n\r\n")
-                writer.flush()
-                socket.close()
-                return
-            }
-
             // WebRTC signaling: POST /webrtc/offer — browser sends SDP offer, Android replies with SDP answer
+            // No CORS headers needed: the UI is served from this same origin.
             if (uri == "/webrtc/offer" && requestParts[0] == "POST") {
                 val contentLength = headers
                     .find { it.startsWith("Content-Length:", ignoreCase = true) }
                     ?.substringAfter(":")?.trim()?.toIntOrNull() ?: 0
                 val bodyChars = CharArray(contentLength)
-                reader.read(bodyChars, 0, contentLength)
+                var totalRead = 0
+                while (totalRead < contentLength) {
+                    val n = reader.read(bodyChars, totalRead, contentLength - totalRead)
+                    if (n == -1) break
+                    totalRead += n
+                }
                 val body = String(bodyChars)
 
                 val offerSdp = try {
@@ -599,7 +593,6 @@ class StreamingServerHelper(
                 writer.print("HTTP/1.1 200 OK\r\n")
                 writer.print("Content-Type: application/json\r\n")
                 writer.print("Content-Length: ${responseBytes.size}\r\n")
-                writer.print("Access-Control-Allow-Origin: *\r\n")
                 writer.print("Connection: close\r\n\r\n")
                 writer.flush()
                 outputStream.write(responseBytes)
