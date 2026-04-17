@@ -555,6 +555,7 @@
       rtcVideo.style.cssText = 'max-width:100%;max-height:100%;display:none;object-fit:contain;';
       streamContainer.appendChild(rtcVideo);
       const streamCanvas = document.getElementById('streamCanvas');
+      let rtcRemoteStream = null;
 
       async function startWebRTC() {
         if (pc) return;
@@ -569,8 +570,15 @@
           pc.addTransceiver('audio', { direction: 'recvonly' });
 
           currentPc.ontrack = (e) => {
-            if (!e.streams || !e.streams[0]) return;
-            rtcVideo.srcObject = e.streams[0];
+            if (e.streams && e.streams[0]) {
+              rtcRemoteStream = e.streams[0];
+            } else if (e.track) {
+              if (!rtcRemoteStream) rtcRemoteStream = new MediaStream();
+              const alreadyPresent = rtcRemoteStream.getTracks().some(t => t.id === e.track.id);
+              if (!alreadyPresent) rtcRemoteStream.addTrack(e.track);
+            }
+            if (!rtcRemoteStream) return;
+            rtcVideo.srcObject = rtcRemoteStream;
             rtcVideo.style.display = 'block';
             streamCanvas.style.display = 'none';
             webrtcActive = true;
@@ -632,6 +640,7 @@
       function closeWebRTC() {
         if (pc) { try { pc.close(); } catch (_) {} pc = null; }
         rtcVideo.srcObject = null;
+        rtcRemoteStream = null;
         rtcVideo.style.display = 'none';
         streamCanvas.style.display = '';
         restoreMjpegAudioControls();
