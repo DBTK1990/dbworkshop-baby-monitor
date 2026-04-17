@@ -225,6 +225,8 @@
       let drawing = false;
       let viewMode = 'fit';
       let torchState = ('{{CUR_TORCH}}' === 'on') ? 'on' : 'off';
+      let pc = null;
+      let webrtcActive = false;
 
       function targetCanvasSize(frame) {
         if (viewMode === 'fit') {
@@ -517,9 +519,6 @@
       }
 
       // ── WebRTC client — low-latency combined audio+video ──────────────────
-      let pc = null;
-      let webrtcActive = false;
-
       const rtcVideo = document.createElement('video');
       rtcVideo.autoplay = true;
       rtcVideo.playsInline = true;
@@ -559,7 +558,8 @@
 
           currentPc.oniceconnectionstatechange = () => {
             if (pc !== currentPc) return;
-            if (['disconnected', 'failed', 'closed'].includes(currentPc.iceConnectionState)) {
+            const iceState = currentPc.iceConnectionState;
+            if (['disconnected', 'failed', 'closed'].includes(iceState)) {
               closeWebRTC();
               if (!mjpegRunning) startMjpegStream();
             }

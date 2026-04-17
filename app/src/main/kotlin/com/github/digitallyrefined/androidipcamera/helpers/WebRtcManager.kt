@@ -113,10 +113,10 @@ class WebRtcManager(
             uPlaneBuffer = ByteArray(w * h / 4)
             vPlaneBuffer = ByteArray(w * h / 4)
         }
-        val argb = argbBuffer ?: return
-        val yPlane = yPlaneBuffer ?: return
-        val uPlane = uPlaneBuffer ?: return
-        val vPlane = vPlaneBuffer ?: return
+        val argb = requireNotNull(argbBuffer) { "ARGB buffer allocation failed unexpectedly" }
+        val yPlane = requireNotNull(yPlaneBuffer) { "Y plane buffer allocation failed unexpectedly" }
+        val uPlane = requireNotNull(uPlaneBuffer) { "U plane buffer allocation failed unexpectedly" }
+        val vPlane = requireNotNull(vPlaneBuffer) { "V plane buffer allocation failed unexpectedly" }
         bitmap.getPixels(argb, 0, w, 0, 0, w, h)
         bitmap.recycle()
 
@@ -222,7 +222,7 @@ class WebRtcManager(
                 ?: throw IllegalStateException("No local description after ICE gathering")
         } catch (e: Exception) {
             closeSession(sessionId)
-            throw e
+            throw
         }
     }
 

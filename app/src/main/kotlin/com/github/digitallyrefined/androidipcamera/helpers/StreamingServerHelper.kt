@@ -21,10 +21,10 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
-import java.io.BufferedReader
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
-import java.io.InputStreamReader
+import java.io.InputStream
 import java.io.OutputStream
 import java.io.PrintWriter
 import java.net.InetAddress
@@ -77,6 +77,7 @@ class StreamingServerHelper(
     private val MAX_FAILED_ATTEMPTS = 5  // 5 failed attempts allowed
     private val BLOCK_DURATION_MS = 15 * 60 * 1000L // 15 minutes block for unauthenticated
     private val RESET_WINDOW_MS = 10 * 60 * 1000L // 10 minutes reset window
+    private val MAX_HTTP_HEADER_LINE_LENGTH = 8192
 
     // Connection limits
     private val MAX_CONNECTION_DURATION_MS = 30 * 60 * 1000L // 30 minutes max per connection (unauthenticated)
@@ -341,16 +342,15 @@ class StreamingServerHelper(
 
     private suspend fun handleClientConnection(socket: Socket, clientIp: String) {
         try {
+            val inputStream = socket.getInputStream()
             val outputStream = socket.getOutputStream()
             val writer = PrintWriter(outputStream, true)
 
             // Configure socket timeouts for security
             socket.soTimeout = SOCKET_TIMEOUT_MS
 
-            val reader = BufferedReader(InputStreamReader(socket.getInputStream(), Charsets.UTF_8))
-
             // Read the request line (e.g., GET /stream HTTP/1.1)
-            val requestLine = reader.readLine() ?: return
+            val requestLine = readHttpLine(inputStream) ?: return
             val requestParts = requestLine.split(" ")
             if (requestParts.size < 2) return
             val uri = requestParts[1]
@@ -380,10 +380,10 @@ class StreamingServerHelper(
 
             // Read HTTP headers
             val headers = mutableListOf<String>()
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                if (line.isNullOrEmpty()) break
-                headers.add(line!!)
+            while (true) {
+                val line = readHttpLine(inputStream) ?: break
+                if (line.isEmpty()) break
+                headers.add(line)
             }
 
             // SECURITY: Require Basic Authentication header for all requests
@@ -565,25 +565,31 @@ class StreamingServerHelper(
                     .find { it.startsWith("Content-Length:", ignoreCase = true) }
                     ?.substringAfter(":")?.trim()?.toIntOrNull() ?: 0
                 if (contentLength <= 0) {
-                    writer.print("HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nMissing or invalid Content-Length")
+                    writer.print("HTTP/1.1 400 Bad Request\r\n")
+                    writer.print("Content-Type: text/plain\r\n")
+                    writer.print("Connection: close\r\n\r\n")
+                    writer.print("Content-Length must be greater than zero for /webrtc/offer\r\n")
                     writer.flush()
                     socket.close()
                     return
                 }
-                val bodyChars = CharArray(contentLength)
+                val bodyBytes = ByteArray(contentLength)
                 var totalRead = 0
                 while (totalRead < contentLength) {
-                    val n = reader.read(bodyChars, totalRead, contentLength - totalRead)
+                    val n = inputStream.read(bodyBytes, totalRead, contentLength - totalRead)
                     if (n == -1) break
                     totalRead += n
                 }
                 if (totalRead != contentLength) {
-                    writer.print("HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nIncomplete request body")
+                    writer.print("HTTP/1.1 400 Bad Request\r\n")
+                    writer.print("Content-Type: text/plain\r\n")
+                    writer.print("Connection: close\r\n\r\n")
+                    writer.print("Incomplete request body\r\n")
                     writer.flush()
                     socket.close()
                     return
                 }
-                val body = String(bodyChars, 0, totalRead)
+                val body = String(bodyBytes, 0, totalRead, Charsets.UTF_8)
 
                 val offerSdp = try {
                     org.json.JSONObject(body).getString("sdp")
@@ -775,6 +781,25 @@ class StreamingServerHelper(
                 // Ignore
             }
         }
+    }
+
+    private fun readHttpLine(inputStream: InputStream): String? {
+        val buffer = ByteArrayOutputStream(128)
+        while (true) {
+            val byte = inputStream.read()
+            if (byte == -1) {
+                if (buffer.size() == 0) return null
+                break
+            }
+            if (byte == '\n'.code) break
+            if (byte != '\r'.code) {
+                if (buffer.size() >= MAX_HTTP_HEADER_LINE_LENGTH) {
+                    throw IOException("HTTP header line too long")
+                }
+                buffer.write(byte)
+            }
+        }
+        return buffer.toString(Charsets.ISO_8859_1.name())
     }
 
     private fun createWavHeader(sampleRate: Int, bitsPerSample: Int, channels: Int): ByteArray {
