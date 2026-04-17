@@ -41,6 +41,20 @@
         position: relative;
       }
 
+      .stream-mode-indicator {
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+        background: rgba(34, 34, 34, 0.9);
+        border: 1px solid #666;
+        color: #fff;
+        z-index: 5;
+      }
+
       .controls-panel {
         width: 350px;
         background: #1e1e1e;
@@ -153,11 +167,12 @@
       </div>
     </div>
 
-    <div class='main'>
-      <div class='stream-container' id='streamContainer'>
-        <canvas id='streamCanvas'></canvas>
-        <audio id="audioEl" preload="none" muted></audio>
-      </div>
+      <div class='main'>
+        <div class='stream-container' id='streamContainer'>
+          <div id="streamModeIndicator" class="stream-mode-indicator">Connecting…</div>
+          <canvas id='streamCanvas'></canvas>
+          <audio id="audioEl" preload="none" muted></audio>
+        </div>
 
       <div class='controls-panel'>
 
@@ -214,6 +229,7 @@
       const muteBtn = document.getElementById('muteBtn');
       const avDelayContainer = document.getElementById('avDelayContainer');
       const streamContainer = document.getElementById('streamContainer');
+      const streamModeIndicator = document.getElementById('streamModeIndicator');
       const avDelay = document.getElementById('avDelay');
       const avDelayVal = document.getElementById('avDelayVal');
       const STREAM_SRC = '/stream';
@@ -227,6 +243,21 @@
       let torchState = ('{{CUR_TORCH}}' === 'on') ? 'on' : 'off';
       let pc = null;
       let webrtcActive = false;
+
+      function setStreamMode(mode) {
+        if (!streamModeIndicator) return;
+        if (mode === 'webrtc') {
+          streamModeIndicator.textContent = 'WebRTC';
+          streamModeIndicator.style.borderColor = '#2ecc71';
+        } else if (mode === 'mpeg-fallback') {
+          streamModeIndicator.textContent = 'MPEG fallback';
+          streamModeIndicator.style.borderColor = '#f39c12';
+        } else {
+          streamModeIndicator.textContent = 'Connecting…';
+          streamModeIndicator.style.borderColor = '#666';
+        }
+      }
+      setStreamMode('connecting');
 
       function targetCanvasSize(frame) {
         if (viewMode === 'fit') {
@@ -341,6 +372,7 @@
         const controller = new AbortController();
         mjpegAbort = controller;
         mjpegRunning = true;
+        setStreamMode('mpeg-fallback');
         frameQueue = [];
         lastDrawn = null;
         const ctx = streamCanvas.getContext('2d');
@@ -530,6 +562,7 @@
       async function startWebRTC() {
         if (pc) return;
         try {
+          setStreamMode('connecting');
           pc = new RTCPeerConnection({
             iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
             bundlePolicy: 'max-bundle'
@@ -544,6 +577,7 @@
             rtcVideo.style.display = 'block';
             streamCanvas.style.display = 'none';
             webrtcActive = true;
+            setStreamMode('webrtc');
             drawing = false;
             stopMjpegStream();
             // Hide AV-sync delay slider — WebRTC handles A/V sync via RTP timestamps
@@ -605,6 +639,7 @@
         streamCanvas.style.display = '';
         restoreMjpegAudioControls();
         webrtcActive = false;
+        setStreamMode(mjpegRunning ? 'mpeg-fallback' : 'connecting');
       }
     </script>
   </body>
