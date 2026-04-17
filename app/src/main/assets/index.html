@@ -243,22 +243,17 @@
       let torchState = ('{{CUR_TORCH}}' === 'on') ? 'on' : 'off';
       let pc = null;
       let webrtcActive = false;
+      const streamModeConfigs = {
+        webrtc: { label: 'WebRTC', borderColor: '#2ecc71' },
+        'mjpeg-fallback': { label: 'MJPEG fallback', borderColor: '#f39c12' },
+        connecting: { label: 'Connecting...', borderColor: '#666' }
+      };
 
       function setStreamMode(mode) {
         if (!streamModeIndicator) return;
-        if (mode === 'webrtc') {
-          streamModeIndicator.textContent = 'WebRTC';
-          streamModeIndicator.style.borderColor = '#2ecc71';
-        } else if (mode === 'mjpeg-fallback') {
-          streamModeIndicator.textContent = 'MJPEG fallback';
-          streamModeIndicator.style.borderColor = '#f39c12';
-        } else if (mode === 'connecting') {
-          streamModeIndicator.textContent = 'Connecting...';
-          streamModeIndicator.style.borderColor = '#666';
-        } else {
-          streamModeIndicator.textContent = 'Connecting...';
-          streamModeIndicator.style.borderColor = '#666';
-        }
+        const config = streamModeConfigs[mode] || streamModeConfigs.connecting;
+        streamModeIndicator.textContent = config.label;
+        streamModeIndicator.style.borderColor = config.borderColor;
       }
       setStreamMode('connecting');
 
