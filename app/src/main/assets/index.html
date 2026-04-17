@@ -249,8 +249,8 @@
         if (mode === 'webrtc') {
           streamModeIndicator.textContent = 'WebRTC';
           streamModeIndicator.style.borderColor = '#2ecc71';
-        } else if (mode === 'mpeg-fallback') {
-          streamModeIndicator.textContent = 'MPEG fallback';
+        } else if (mode === 'mjpeg-fallback') {
+          streamModeIndicator.textContent = 'MJPEG fallback';
           streamModeIndicator.style.borderColor = '#f39c12';
         } else {
           streamModeIndicator.textContent = 'Connecting…';
@@ -372,7 +372,7 @@
         const controller = new AbortController();
         mjpegAbort = controller;
         mjpegRunning = true;
-        setStreamMode('mpeg-fallback');
+        setStreamMode('mjpeg-fallback');
         frameQueue = [];
         lastDrawn = null;
         const ctx = streamCanvas.getContext('2d');
@@ -639,7 +639,7 @@
         streamCanvas.style.display = '';
         restoreMjpegAudioControls();
         webrtcActive = false;
-        setStreamMode(mjpegRunning ? 'mpeg-fallback' : 'connecting');
+        setStreamMode(mjpegRunning ? 'mjpeg-fallback' : 'connecting');
       }
     </script>
   </body>
