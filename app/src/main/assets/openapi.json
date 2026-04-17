@@ -274,6 +274,81 @@
         }
       }
     },
+    "/webrtc/offer": {
+      "post": {
+        "summary": "WebRTC signaling — create a peer connection",
+        "description": "Accepts an SDP offer from a WebRTC browser client. Returns an SDP answer with bundled ICE candidates. The resulting peer connection streams combined video and audio in a single low-latency WebRTC session. Audio and video arrive on the same peer connection; no separate /audio connection is needed. Requires Basic Authentication.",
+        "operationId": "postWebRtcOffer",
+        "tags": ["Media"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["sdp", "type"],
+                "properties": {
+                  "sdp": {
+                    "type": "string",
+                    "description": "SDP offer from the browser RTCPeerConnection"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": ["offer"]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "SDP answer with bundled ICE candidates. Set this as the remote description on the browser RTCPeerConnection.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sdp": {
+                      "type": "string",
+                      "description": "SDP answer"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["answer"]
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "description": "UUID identifying this WebRTC session"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON body or missing sdp field."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "description": "WebRTC peer connection could not be established."
+          }
+        }
+      },
+      "options": {
+        "summary": "CORS preflight for WebRTC signaling",
+        "operationId": "optionsWebRtcOffer",
+        "tags": ["Media"],
+        "security": [],
+        "responses": {
+          "204": {
+            "description": "CORS preflight accepted."
+          }
+        }
+      }
+    },
     "/openapi.json": {
       "get": {
         "summary": "OpenAPI specification",
