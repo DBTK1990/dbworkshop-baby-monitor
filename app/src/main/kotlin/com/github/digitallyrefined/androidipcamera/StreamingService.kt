@@ -58,6 +58,8 @@ class StreamingService : LifecycleService() {
     private var lastFrameTime = 0L
     private var lensFacing = CameraSelector.DEFAULT_BACK_CAMERA
     private var cameraResolutionHelper: CameraResolutionHelper? = null
+    private var webRtcManager: WebRtcManager? = null
+    private var cameraXVideoSource: CameraXVideoSource? = null
 
     // UI Callbacks
     var onClientConnected: (() -> Unit)? = null
@@ -173,6 +175,8 @@ class StreamingService : LifecycleService() {
         }
         cameraExecutor?.shutdown()
         stopCamera()
+        webRtcManager?.shutdown()
+        webRtcManager = null
         lifecycleScope.launch(Dispatchers.IO) {
             streamingServerHelper?.stopStreamingServer()
         }
@@ -318,6 +322,29 @@ class StreamingService : LifecycleService() {
 
     private fun initServer() {
         if (streamingServerHelper == null) {
+            // Initialize WebRTC — PeerConnectionFactory requires the main thread
+            if (webRtcManager == null) {
+                val mgr = WebRtcManager(this) { msg ->
+                    Log.i(TAG, "WebRTC: $msg")
+                    onLog?.invoke(msg)
+                }
+                lifecycleScope.launch(Dispatchers.Main) {
+                    mgr.initialize()
+                }
+                mgr.onPeerCountChanged = { count ->
+                    launchMain {
+                        if (count > 0) {
+                            startCameraIfNeeded()
+                        } else if (streamingServerHelper?.getClients()?.isEmpty() == true) {
+                            stopCamera()
+                            onClientDisconnected?.invoke()
+                        }
+                    }
+                }
+                webRtcManager = mgr
+                cameraXVideoSource = CameraXVideoSource(mgr)
+            }
+
             streamingServerHelper = StreamingServerHelper(
                 this,
                 onLog = { message ->
@@ -331,7 +358,8 @@ class StreamingService : LifecycleService() {
                     }
                 },
                 onClientDisconnected = {
-                    if (streamingServerHelper?.getClients()?.isEmpty() == true) {
+                    if (streamingServerHelper?.getClients()?.isEmpty() == true &&
+                        webRtcManager?.hasPeers() != true) {
                         launchMain {
                             stopCamera()
                             onClientDisconnected?.invoke()
@@ -339,7 +367,9 @@ class StreamingService : LifecycleService() {
                     }
                 },
                 onControlCommand = { key: String, value: String -> handleRemoteControl(key, value) }
-            )
+            ).also { helper ->
+                helper.webRtcManager = webRtcManager
+            }
         }
         streamingServerHelper?.startStreamingServer()
         Log.i(TAG, "Requested HTTPS server start on port $STREAM_PORT")
@@ -411,7 +441,8 @@ class StreamingService : LifecycleService() {
                 .also { analysis ->
                     cameraExecutor?.let { executor ->
                         analysis.setAnalyzer(executor) { image ->
-                            if (streamingServerHelper?.getClients()?.isNotEmpty() == true) {
+                            if (streamingServerHelper?.getClients()?.isNotEmpty() == true ||
+                                webRtcManager?.hasPeers() == true) {
                                 processImage(image)
                             }
                             image.close()
@@ -656,6 +687,9 @@ class StreamingService : LifecycleService() {
             }
             toRemove.forEach { streamingServerHelper?.removeClient(it) }
         }
+
+        // Feed WebRTC peers with the fully transformed frame
+        cameraXVideoSource?.pushFrame(jpegBytes, image.width, image.height, totalRotation)
     }
 
     private fun generateRandomPassword(): String {

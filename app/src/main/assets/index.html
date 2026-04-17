@@ -443,7 +443,9 @@
           })
           .catch(() => { mjpegRunning = false; });
       }
-      startMjpegStream();
+      // Try WebRTC first; 4s safety net starts MJPEG if WebRTC fails to connect
+      startWebRTC();
+      setTimeout(() => { if (!webrtcActive) startMjpegStream(); }, 4000);
 
       function stopMjpegStream() {
         if (mjpegAbort) {
@@ -455,7 +457,7 @@
 
       document.addEventListener('visibilitychange', () => {
         if (document.hidden) {
-          // Stop audio and image streams when backgrounded
+          // Stop all streams when backgrounded
           if (!audioEl.muted) {
             audioEl.muted = true;
             audioEl.pause();
@@ -464,10 +466,14 @@
             audioEl.removeAttribute('src');
             audioEl.load();
           }
+          closeWebRTC();
           stopMjpegStream();
         } else {
-          // Restart only the image stream on foreground
-          startMjpegStream();
+          // Restart stream on foreground — prefer WebRTC
+          if (!webrtcActive) {
+            startWebRTC();
+            setTimeout(() => { if (!webrtcActive) startMjpegStream(); }, 4000);
+          }
         }
       });
 
@@ -505,6 +511,94 @@
           viewMode = 'original';
         }
         applyCanvasSize(targetCanvasSize(lastDrawn));
+      }
+
+      // ── WebRTC client — low-latency combined audio+video ──────────────────
+      let pc = null;
+      let webrtcActive = false;
+
+      const rtcVideo = document.createElement('video');
+      rtcVideo.autoplay = true;
+      rtcVideo.playsInline = true;
+      rtcVideo.muted = true;
+      rtcVideo.style.cssText = 'max-width:100%;max-height:100%;display:none;object-fit:contain;';
+      streamContainer.appendChild(rtcVideo);
+      const streamCanvas = document.getElementById('streamCanvas');
+
+      async function startWebRTC() {
+        if (pc) return;
+        try {
+          pc = new RTCPeerConnection({
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+            bundlePolicy: 'max-bundle'
+          });
+          pc.addTransceiver('video', { direction: 'recvonly' });
+          pc.addTransceiver('audio', { direction: 'recvonly' });
+
+          pc.ontrack = (e) => {
+            if (!e.streams || !e.streams[0]) return;
+            rtcVideo.srcObject = e.streams[0];
+            rtcVideo.style.display = 'block';
+            streamCanvas.style.display = 'none';
+            webrtcActive = true;
+            drawing = false;
+            stopMjpegStream();
+            // Hide AV-sync delay slider — WebRTC handles A/V sync via RTP timestamps
+            avDelayContainer.style.display = 'none';
+            // Remap mute button to WebRTC video element
+            muteBtn.textContent = '\uD83D\uDD07 Unmute Audio';
+            muteBtn.onclick = () => {
+              rtcVideo.muted = !rtcVideo.muted;
+              muteBtn.textContent = rtcVideo.muted ? '\uD83D\uDD07 Unmute Audio' : '\uD83D\uDD0A Mute Audio';
+            };
+          };
+
+          pc.oniceconnectionstatechange = () => {
+            if (['disconnected', 'failed', 'closed'].includes(pc.iceConnectionState)) {
+              closeWebRTC();
+              rtcVideo.style.display = 'none';
+              streamCanvas.style.display = '';
+              webrtcActive = false;
+              if (!mjpegRunning) startMjpegStream();
+            }
+          };
+
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+
+          // Wait for ICE gathering to finish (LAN: ~50ms, timeout 2s)
+          await new Promise(resolve => {
+            if (pc.iceGatheringState === 'complete') { resolve(); return; }
+            const check = () => {
+              if (pc.iceGatheringState === 'complete') {
+                pc.removeEventListener('icegatheringstatechange', check);
+                resolve();
+              }
+            };
+            pc.addEventListener('icegatheringstatechange', check);
+            setTimeout(resolve, 2000);
+          });
+
+          const resp = await fetch('/webrtc/offer', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sdp: pc.localDescription.sdp, type: 'offer' })
+          });
+          if (!resp.ok) throw new Error('signaling ' + resp.status);
+          const { sdp, type } = await resp.json();
+          await pc.setRemoteDescription(new RTCSessionDescription({ sdp, type }));
+
+        } catch (err) {
+          console.warn('WebRTC failed, falling back to MJPEG:', err);
+          closeWebRTC();
+          if (!mjpegRunning) startMjpegStream();
+        }
+      }
+
+      function closeWebRTC() {
+        if (pc) { try { pc.close(); } catch (_) {} pc = null; }
+        webrtcActive = false;
       }
     </script>
   </body>

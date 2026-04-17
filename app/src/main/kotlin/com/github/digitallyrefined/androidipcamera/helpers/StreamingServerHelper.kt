@@ -71,6 +71,7 @@ class StreamingServerHelper(
     private val failedAttempts = ConcurrentHashMap<String, FailedAttempt>()
     @Volatile
     private var appInForeground: Boolean = true
+    var webRtcManager: WebRtcManager? = null
 
     // SECURITY: Rate limiting constants (only for unauthenticated connections)
     private val MAX_FAILED_ATTEMPTS = 5  // 5 failed attempts allowed
@@ -542,6 +543,67 @@ class StreamingServerHelper(
                     outputStream.write(bytes)
                     outputStream.flush()
                 }
+                socket.close()
+                return
+            }
+
+            // WebRTC CORS preflight
+            if (uri == "/webrtc/offer" && requestParts[0] == "OPTIONS") {
+                writer.print("HTTP/1.1 204 No Content\r\n")
+                writer.print("Access-Control-Allow-Origin: *\r\n")
+                writer.print("Access-Control-Allow-Methods: POST, OPTIONS\r\n")
+                writer.print("Access-Control-Allow-Headers: Authorization, Content-Type\r\n")
+                writer.print("Connection: close\r\n\r\n")
+                writer.flush()
+                socket.close()
+                return
+            }
+
+            // WebRTC signaling: POST /webrtc/offer — browser sends SDP offer, Android replies with SDP answer
+            if (uri == "/webrtc/offer" && requestParts[0] == "POST") {
+                val contentLength = headers
+                    .find { it.startsWith("Content-Length:", ignoreCase = true) }
+                    ?.substringAfter(":")?.trim()?.toIntOrNull() ?: 0
+                val bodyChars = CharArray(contentLength)
+                reader.read(bodyChars, 0, contentLength)
+                val body = String(bodyChars)
+
+                val offerSdp = try {
+                    org.json.JSONObject(body).getString("sdp")
+                } catch (e: Exception) {
+                    writer.print("HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nInvalid JSON")
+                    writer.flush()
+                    socket.close()
+                    return
+                }
+
+                val sessionId = java.util.UUID.randomUUID().toString()
+                val answerSdp = try {
+                    webRtcManager?.handleOffer(sessionId, offerSdp)
+                        ?: throw IllegalStateException("WebRTC not initialized")
+                } catch (e: Exception) {
+                    onLog("WebRTC offer error: ${e.message}")
+                    writer.print("HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n${e.message}")
+                    writer.flush()
+                    socket.close()
+                    return
+                }
+
+                val responseBytes = org.json.JSONObject()
+                    .put("sdp", answerSdp)
+                    .put("type", "answer")
+                    .put("sessionId", sessionId)
+                    .toString()
+                    .toByteArray(Charsets.UTF_8)
+
+                writer.print("HTTP/1.1 200 OK\r\n")
+                writer.print("Content-Type: application/json\r\n")
+                writer.print("Content-Length: ${responseBytes.size}\r\n")
+                writer.print("Access-Control-Allow-Origin: *\r\n")
+                writer.print("Connection: close\r\n\r\n")
+                writer.flush()
+                outputStream.write(responseBytes)
+                outputStream.flush()
                 socket.close()
                 return
             }
