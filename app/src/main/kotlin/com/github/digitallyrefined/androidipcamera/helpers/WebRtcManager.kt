@@ -222,7 +222,7 @@ class WebRtcManager(
                 ?: throw IllegalStateException("No local description after ICE gathering")
         } catch (e: Exception) {
             closeSession(sessionId)
-            throw
+            throw e
         }
     }
 

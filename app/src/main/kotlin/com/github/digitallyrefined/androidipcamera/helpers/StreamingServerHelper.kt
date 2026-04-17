@@ -741,14 +741,10 @@ class StreamingServerHelper(
                 // Keep connection alive - frames will be sent from MainActivity.processImage()
                 // Wait for connection to close or be removed
                 try {
-                    // Read from socket to detect when client disconnects
-                    while (socket.isConnected && !socket.isClosed) {
-                        // Check if socket has data (client disconnect will cause exception)
-                        if (reader.ready()) {
-                            val line = reader.readLine()
-                            if (line == null) break // Client disconnected
-                        }
-                        Thread.sleep(1000) // Check every second
+                    while (socket.isConnected &&
+                        !socket.isClosed &&
+                        clients.any { it.socket == socket }) {
+                        Thread.sleep(1000)
                     }
                 } catch (e: IOException) {
                     // Client disconnected
