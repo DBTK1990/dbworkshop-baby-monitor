@@ -152,13 +152,18 @@ class StreamingService : LifecycleService() {
     private fun startNotificationChannelCheckFallback() {
         lifecycleScope.launch(Dispatchers.Main) {
             while (isActive) {
-                val manager = getSystemService(NotificationManager::class.java)
-                val channel = manager.getNotificationChannel(CHANNEL_ID)
-                if (channel != null && channel.importance == NotificationManager.IMPORTANCE_NONE) {
-                    Log.w(TAG, "Notification channel $CHANNEL_ID blocked (fallback check). Stopping service.")
-                    handleStopService()
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val manager = getSystemService(NotificationManager::class.java)
+                    val channel = manager.getNotificationChannel(CHANNEL_ID)
+                    if (channel != null && channel.importance == NotificationManager.IMPORTANCE_NONE) {
+                        Log.w(TAG, "Notification channel $CHANNEL_ID blocked (fallback check). Stopping service.")
+                        handleStopService()
+                        break
+                    }
+                } else {
                     break
                 }
+
                 kotlinx.coroutines.delay(5000)
             }
         }
