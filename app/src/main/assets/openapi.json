@@ -169,47 +169,6 @@
         }
       }
     },
-    "/stream": {
-      "get": {
-        "summary": "Live MJPEG video stream",
-        "description": "Returns a continuous MJPEG (Motion JPEG) stream from the device camera. The connection stays open and frames are delivered as multipart HTTP. Up to 10 simultaneous authenticated clients are supported.",
-        "operationId": "getVideoStream",
-        "tags": ["Media"],
-        "responses": {
-          "200": {
-            "description": "MJPEG video stream. The response is a continuous multipart stream; each part is a JPEG frame.",
-            "headers": {
-              "Cache-Control": {
-                "schema": { "type": "string" },
-                "example": "no-cache, no-store, must-revalidate"
-              },
-              "Connection": {
-                "schema": { "type": "string" },
-                "example": "keep-alive"
-              }
-            },
-            "content": {
-              "multipart/x-mixed-replace": {
-                "schema": {
-                  "type": "string",
-                  "format": "binary",
-                  "description": "Continuous stream of JPEG frames separated by '--frame' boundary. Each part has Content-Type: image/jpeg and Content-Length headers."
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          },
-          "503": {
-            "$ref": "#/components/responses/ServiceUnavailable"
-          }
-        }
-      }
-    },
     "/audio": {
       "get": {
         "summary": "Live WAV audio stream",

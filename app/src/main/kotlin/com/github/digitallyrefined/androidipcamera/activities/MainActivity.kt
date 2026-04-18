@@ -70,7 +70,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             // Check current status
-            val hasClients = streamingService?.streamingServerHelper?.getClients()?.isNotEmpty() == true
+            val hasClients = streamingService?.streamingServerHelper?.hasAnyClients() == true
             showNoClientMessage(!hasClients)
         }
 
@@ -313,7 +313,7 @@ class MainActivity : AppCompatActivity() {
             hidePreviewButton.visibility = View.VISIBLE
             exitButton.visibility = View.VISIBLE
 
-            val hasClients = streamingService?.streamingServerHelper?.getClients()?.isNotEmpty() == true
+            val hasClients = streamingService?.streamingServerHelper?.hasAnyClients() == true
 
             viewFinder.visibility = if (hasClients) View.VISIBLE else View.INVISIBLE
             noClientMessage.visibility = if (hasClients) View.GONE else View.VISIBLE
