@@ -55,9 +55,9 @@ class MainActivity : AppCompatActivity() {
     // Log tab
     private lateinit var logAdapter: LogAdapter
     private lateinit var logRecyclerView: RecyclerView
-    private var currentFilter = ""
+    private var currentRegex: Regex? = null
     private val logListener: (LogEntry) -> Unit = { entry ->
-        runOnUiThread { logAdapter.addEntry(entry, currentFilter) }
+        runOnUiThread { logAdapter.addEntry(entry, currentRegex) }
     }
 
     private val connection = object : ServiceConnection {
@@ -197,15 +197,21 @@ class MainActivity : AppCompatActivity() {
         logRecyclerView.adapter = logAdapter
 
         // Populate with any logs collected before this activity opened
-        logAdapter.setEntries(AppLogger.getEntries(), currentFilter)
+        logAdapter.setEntries(AppLogger.getEntries(), currentRegex)
 
         val searchInput = findViewById<EditText>(R.id.logSearchInput)
         searchInput.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) {
-                currentFilter = s?.toString().orEmpty()
-                logAdapter.setEntries(AppLogger.getEntries(), currentFilter)
+                val raw = s?.toString().orEmpty()
+                val (isValid, compiled) = compileRegex(raw)
+                // Tint the field red for invalid regex patterns so the user gets immediate feedback
+                searchInput.setTextColor(
+                    if (isValid) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#FF4444")
+                )
+                currentRegex  = compiled
+                logAdapter.setEntries(AppLogger.getEntries(), compiled)
                 if (logAdapter.itemCount > 0) {
                     logRecyclerView.scrollToPosition(logAdapter.itemCount - 1)
                 }
@@ -407,9 +413,9 @@ class MainActivity : AppCompatActivity() {
         override fun getItemCount() = displayedEntries.size
 
         /** Replace the entire list (used when filter changes). */
-        fun setEntries(all: List<LogEntry>, filter: String) {
+        fun setEntries(all: List<LogEntry>, regex: Regex?) {
             displayedEntries.clear()
-            displayedEntries.addAll(applyFilter(all, filter))
+            displayedEntries.addAll(if (regex == null) all else all.filter { matches(it, regex) })
             notifyDataSetChanged()
             if (displayedEntries.isNotEmpty()) {
                 logRecyclerView.scrollToPosition(displayedEntries.size - 1)
@@ -417,28 +423,24 @@ class MainActivity : AppCompatActivity() {
         }
 
         /** Append one new entry (called from the AppLogger listener). */
-        fun addEntry(entry: LogEntry, filter: String) {
-            if (!matchesFilter(entry, filter)) return
+        fun addEntry(entry: LogEntry, regex: Regex?) {
+            if (regex != null && !matches(entry, regex)) return
             displayedEntries.add(entry)
             notifyItemInserted(displayedEntries.size - 1)
             logRecyclerView.scrollToPosition(displayedEntries.size - 1)
         }
 
-        private fun applyFilter(entries: List<LogEntry>, filter: String): List<LogEntry> {
-            if (filter.isBlank()) return entries
-            return try {
-                val regex = Regex(filter, RegexOption.IGNORE_CASE)
-                entries.filter { matchesFilter(it, filter, regex) }
-            } catch (_: Exception) {
-                entries // invalid regex — show everything
-            }
-        }
+        private fun matches(entry: LogEntry, regex: Regex): Boolean =
+            regex.containsMatchIn(AppLogger.formatCLF(entry))
+    }
 
-        private fun matchesFilter(entry: LogEntry, filter: String, regex: Regex? = null): Boolean {
-            if (filter.isBlank()) return true
-            val r = regex ?: try { Regex(filter, RegexOption.IGNORE_CASE) } catch (_: Exception) { return true }
-            val clf = AppLogger.formatCLF(entry)
-            return r.containsMatchIn(clf)
+    /** Returns (isValidPattern, compiledRegex-or-null). Null means blank or invalid pattern. */
+    private fun compileRegex(pattern: String): Pair<Boolean, Regex?> {
+        if (pattern.isBlank()) return Pair(true, null)
+        return try {
+            Pair(true, Regex(pattern, RegexOption.IGNORE_CASE))
+        } catch (e: Exception) {
+            Pair(false, null)
         }
     }
 
