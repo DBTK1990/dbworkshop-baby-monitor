@@ -194,6 +194,20 @@ class SettingsActivity : AppCompatActivity() {
                 }
             }
 
+            // Save registration token to SecureStorage (never persist plaintext)
+            findPreference<EditTextPreference>("registration_token")?.apply {
+                setOnBindEditTextListener { editText ->
+                    editText.text = null
+                    editText.hint = "Enter registration token"
+                }
+                setOnPreferenceChangeListener { _, newValue ->
+                    val token = newValue.toString()
+                    if (token.isEmpty()) return@setOnPreferenceChangeListener false
+                    secureStorage.putSecureString(SecureStorage.KEY_REGISTRATION_TOKEN, token)
+                    false
+                }
+            }
+
             // Add listener for camera resolution changes
             findPreference<Preference>("camera_resolution")?.apply {
                 setOnPreferenceChangeListener { preference, newValue ->

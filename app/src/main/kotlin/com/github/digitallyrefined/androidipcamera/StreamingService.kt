@@ -381,6 +381,7 @@ class StreamingService : LifecycleService() {
         }
         streamingServerHelper?.startStreamingServer()
         Log.i(TAG, "Requested HTTPS server start on port $STREAM_PORT")
+        CameraRegistrationHelper.register(this, getLocalIpAddress())
     }
 
     private fun launchMain(block: () -> Unit) {
@@ -696,8 +697,8 @@ class StreamingService : LifecycleService() {
             toRemove.forEach { streamingServerHelper?.removeClient(it) }
         }
 
-        // Feed WebRTC peers with the fully transformed frame
-        cameraXVideoSource?.pushFrame(jpegBytes, image.width, image.height, totalRotation)
+        // Feed WebRTC peers — pass 0 rotation because jpegBytes pixels are already rotated
+        cameraXVideoSource?.pushFrame(jpegBytes, image.width, image.height, 0)
     }
 
     private fun generateRandomPassword(): String {
