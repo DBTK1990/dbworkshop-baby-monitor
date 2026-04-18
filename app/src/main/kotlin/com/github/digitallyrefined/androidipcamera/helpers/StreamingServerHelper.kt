@@ -469,7 +469,7 @@ class StreamingServerHelper(
                             outputStream = outputStream,
                             statusLine = "RTSP/1.0 200 OK",
                             cSeq = cSeq,
-                            headers = mapOf("Public" to "OPTIONS, DESCRIBE, SETUP, PLAY, TEARDOWN, GET_PARAMETER")
+                            headers = mapOf("Public" to "OPTIONS, DESCRIBE, SETUP, PLAY, TEARDOWN, GET_PARAMETER, GET")
                         )
                     }
                     "DESCRIBE" -> {
@@ -553,7 +553,7 @@ class StreamingServerHelper(
                             onClientConnected()
                         }
                     }
-                    "GET_PARAMETER" -> {
+                    "GET", "GET_PARAMETER" -> {
                         sendRtspResponse(
                             outputStream = outputStream,
                             statusLine = "RTSP/1.0 200 OK",
@@ -580,7 +580,7 @@ class StreamingServerHelper(
                             outputStream = outputStream,
                             statusLine = "RTSP/1.0 405 Method Not Allowed",
                             cSeq = cSeq,
-                            headers = mapOf("Allow" to "OPTIONS, DESCRIBE, SETUP, PLAY, TEARDOWN, GET_PARAMETER")
+                            headers = mapOf("Allow" to "OPTIONS, DESCRIBE, SETUP, PLAY, TEARDOWN, GET_PARAMETER, GET")
                         )
                     }
                 }
