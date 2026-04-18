@@ -1223,16 +1223,14 @@ a=control:$normalizedUri
                 return
             }
 
-            } else {
-                writer.print("HTTP/1.1 404 Not Found\r\n")
-                writer.print("Content-Type: text/plain\r\n")
-                writer.print("Connection: close\r\n\r\n")
-                writer.print("Not Found\r\n")
-                writer.flush()
-                try {
-                    socket.close()
-                } catch (_: Exception) {
-                }
+            writer.print("HTTP/1.1 404 Not Found\r\n")
+            writer.print("Content-Type: text/plain\r\n")
+            writer.print("Connection: close\r\n\r\n")
+            writer.print("Not Found\r\n")
+            writer.flush()
+            try {
+                socket.close()
+            } catch (_: Exception) {
             }
         } catch (e: Exception) {
             onLog("Error handling client connection from $clientIp: ${e.message}")
