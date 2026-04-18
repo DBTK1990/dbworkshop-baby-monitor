@@ -32,6 +32,7 @@ import java.net.InetAddress
 import java.net.URI
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.URLDecoder
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.KeyStore
@@ -628,9 +629,9 @@ class StreamingServerHelper(
         val secureStorage = SecureStorage(context)
         val rawUsername = secureStorage.getSecureString(SecureStorage.KEY_USERNAME, "") ?: ""
         val rawPassword = secureStorage.getSecureString(SecureStorage.KEY_PASSWORD, "") ?: ""
-        val username = InputValidator.validateAndSanitizeUsername(rawUsername)
-        val password = InputValidator.validateAndSanitizePassword(rawPassword)
-        if (username.isNullOrEmpty() || password.isNullOrEmpty()) {
+        val username = rawUsername.trim()
+        val password = rawPassword
+        if (!InputValidator.isValidUsername(username) || !InputValidator.isValidPassword(password)) {
             recordFailedAttempt(clientIp)
             onLog("SECURITY: RTSP connection rejected - credentials not configured")
             return false
@@ -670,12 +671,13 @@ class StreamingServerHelper(
             val userInfo = URI(requestUri).userInfo ?: return null
             if (!userInfo.contains(":")) return null
 
-            val uriUsername = userInfo.substringBefore(":")
-            val uriPassword = userInfo.substringAfter(":", "")
+            val uriUsername = URLDecoder.decode(userInfo.substringBefore(":"), Charsets.UTF_8.name()).trim()
+            val uriPassword = URLDecoder.decode(userInfo.substringAfter(":", ""), Charsets.UTF_8.name())
             if (uriPassword.isEmpty()) return null
-            val validatedUsername = InputValidator.validateAndSanitizeUsername(uriUsername) ?: return null
-            val validatedPassword = InputValidator.validateAndSanitizePassword(uriPassword) ?: return null
-            "$validatedUsername:$validatedPassword"
+            if (!InputValidator.isValidUsername(uriUsername) || !InputValidator.isValidPassword(uriPassword)) {
+                return null
+            }
+            "$uriUsername:$uriPassword"
         } catch (_: Exception) {
             onLog("SECURITY: Rejected malformed RTSP URI credentials")
             null
@@ -882,10 +884,10 @@ a=control:$normalizedUri
 
             // SECURITY: Authentication is now MANDATORY for all connections
             // Validate stored credentials - require both username and password
-            val username = InputValidator.validateAndSanitizeUsername(rawUsername)
-            val password = InputValidator.validateAndSanitizePassword(rawPassword)
+            val username = rawUsername.trim()
+            val password = rawPassword
 
-            if (username == null || password == null || username.isEmpty() || password.isEmpty()) {
+            if (!InputValidator.isValidUsername(username) || !InputValidator.isValidPassword(password)) {
                 // CRITICAL: No valid credentials configured - reject all connections
                 recordFailedAttempt(clientIp)
                 writer.print("HTTP/1.1 403 Forbidden\r\n")
