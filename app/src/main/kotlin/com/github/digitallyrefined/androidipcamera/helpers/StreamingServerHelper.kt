@@ -652,14 +652,7 @@ class StreamingServerHelper(
                 recordFailedAttempt(clientIp)
                 return false
             }
-            else -> {
-                val uriUserInfo = parseRtspUriUserInfo(requestUri)
-                if (uriUserInfo == null) {
-                    recordFailedAttempt(clientIp)
-                    return false
-                }
-                uriUserInfo
-            }
+            else -> parseRtspUriUserInfo(requestUri) ?: return false
         }
         val valid = decodedAuth == "$username:$password"
         if (!valid) {
@@ -674,7 +667,14 @@ class StreamingServerHelper(
             return null
         }
         return try {
-            URI(requestUri).userInfo
+            val userInfo = URI(requestUri).userInfo ?: return null
+            if (!userInfo.contains(":")) return null
+
+            val uriUsername = userInfo.substringBefore(":")
+            val uriPassword = userInfo.substringAfter(":", "")
+            val validatedUsername = InputValidator.validateAndSanitizeUsername(uriUsername) ?: return null
+            val validatedPassword = InputValidator.validateAndSanitizePassword(uriPassword) ?: return null
+            "$validatedUsername:$validatedPassword"
         } catch (_: Exception) {
             null
         }
