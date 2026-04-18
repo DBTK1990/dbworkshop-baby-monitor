@@ -169,47 +169,6 @@
         }
       }
     },
-    "/stream": {
-      "get": {
-        "summary": "Live MJPEG video stream",
-        "description": "Returns a continuous MJPEG (Motion JPEG) stream from the device camera. The connection stays open and frames are delivered as multipart HTTP. Up to 10 simultaneous authenticated clients are supported.",
-        "operationId": "getVideoStream",
-        "tags": ["Media"],
-        "responses": {
-          "200": {
-            "description": "MJPEG video stream. The response is a continuous multipart stream; each part is a JPEG frame.",
-            "headers": {
-              "Cache-Control": {
-                "schema": { "type": "string" },
-                "example": "no-cache, no-store, must-revalidate"
-              },
-              "Connection": {
-                "schema": { "type": "string" },
-                "example": "keep-alive"
-              }
-            },
-            "content": {
-              "multipart/x-mixed-replace": {
-                "schema": {
-                  "type": "string",
-                  "format": "binary",
-                  "description": "Continuous stream of JPEG frames separated by '--frame' boundary. Each part has Content-Type: image/jpeg and Content-Length headers."
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          },
-          "503": {
-            "$ref": "#/components/responses/ServiceUnavailable"
-          }
-        }
-      }
-    },
     "/audio": {
       "get": {
         "summary": "Live WAV audio stream",
@@ -298,12 +257,24 @@
                   }
                 }
               }
+            },
+            "application/sdp": {
+              "schema": {
+                "type": "string",
+                "description": "Raw SDP offer body (used by go2rtc and other WebRTC clients that send SDP directly)"
+              }
+            },
+            "text/plain": {
+              "schema": {
+                "type": "string",
+                "description": "Raw SDP offer body"
+              }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "SDP answer with bundled ICE candidates. Set this as the remote description on the browser RTCPeerConnection.",
+            "description": "SDP answer with bundled ICE candidates. Response format mirrors the request: JSON requests receive a JSON body; raw SDP requests receive a plain-text SDP answer. Set this as the remote description on the browser RTCPeerConnection.",
             "content": {
               "application/json": {
                 "schema": {
@@ -323,11 +294,17 @@
                     }
                   }
                 }
+              },
+              "application/sdp": {
+                "schema": {
+                  "type": "string",
+                  "description": "Raw SDP answer (returned when the request Content-Type was application/sdp or text/plain)"
+                }
               }
             }
           },
           "400": {
-            "description": "Invalid JSON body or missing sdp field."
+            "description": "Invalid request body or missing SDP field."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
