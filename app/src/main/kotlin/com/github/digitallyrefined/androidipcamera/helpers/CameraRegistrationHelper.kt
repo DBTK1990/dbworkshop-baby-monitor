@@ -33,8 +33,10 @@ object CameraRegistrationHelper {
 
                 val responseCode = conn.responseCode
                 if (responseCode in 200..299) {
+                    // Consume body so underlying socket can be reused/closed cleanly.
                     conn.inputStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
                 } else {
+                    // Consume error body for the same reason as success path.
                     conn.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
                 }
 
