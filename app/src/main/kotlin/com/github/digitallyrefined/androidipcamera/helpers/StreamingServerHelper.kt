@@ -401,7 +401,7 @@ class StreamingServerHelper(
                         try {
                             val socket = rtspServerSocket?.accept() ?: continue
                             val clientIp = socket.inetAddress.hostAddress
-                            CoroutineScope(Dispatchers.IO).launch {
+                            launch(Dispatchers.IO) {
                                 handleRtspClientConnection(socket, clientIp)
                             }
                         } catch (e: IOException) {
@@ -534,6 +534,7 @@ class StreamingServerHelper(
                             sendRtspResponse(outputStream, "RTSP/1.0 454 Session Not Found", cSeq)
                             continue
                         }
+                        val wasPlaying = client.isPlaying
                         client.isPlaying = true
                         sessionId = client.sessionId
                         sendRtspResponse(
@@ -545,7 +546,9 @@ class StreamingServerHelper(
                                 "RTP-Info" to "url=$uri;seq=${client.sequenceNumber};rtptime=${currentRtpTimestamp()}"
                             )
                         )
-                        onClientConnected()
+                        if (!wasPlaying) {
+                            onClientConnected()
+                        }
                     }
                     "GET_PARAMETER" -> {
                         sendRtspResponse(
@@ -726,8 +729,8 @@ a=control:$normalizedUri
         }
 
         val dimensions = getJpegDimensions(jpegBytes)
-        val widthBlocks = (dimensions.first / 8).coerceIn(0, 255)
-        val heightBlocks = (dimensions.second / 8).coerceIn(0, 255)
+        val widthBlocks = ((dimensions.first + 7) / 8).coerceIn(0, 255)
+        val heightBlocks = ((dimensions.second + 7) / 8).coerceIn(0, 255)
         val timestamp = currentRtpTimestamp()
         val maxPayload = RTP_MAX_PACKET_SIZE - RTP_JPEG_OVERHEAD
         val clientsToRemove = mutableListOf<String>()
