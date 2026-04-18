@@ -606,7 +606,7 @@ class StreamingServerHelper(
                         ?: throw IllegalStateException("WebRTC not initialized")
                 } catch (e: Exception) {
                     onLog("WebRTC offer error: ${e.message}")
-                    writer.print("HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n${e.message}")
+                    writer.print("HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nWebRTC signaling failed")
                     writer.flush()
                     socket.close()
                     return

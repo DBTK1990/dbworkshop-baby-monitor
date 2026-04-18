@@ -172,9 +172,9 @@ class WebRtcManager(
                 }
             }
             override fun onIceConnectionChange(state: IceConnectionState) {
+                // DISCONNECTED is often transient (brief Wi-Fi handoff); only tear down on terminal states
                 if (state == IceConnectionState.FAILED ||
-                    state == IceConnectionState.CLOSED ||
-                    state == IceConnectionState.DISCONNECTED) {
+                    state == IceConnectionState.CLOSED) {
                     onLog("WebRTC session $sessionId ICE state: $state")
                     closeSession(sessionId)
                 }
