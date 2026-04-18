@@ -25,7 +25,6 @@ import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.widget.EditText
 import android.widget.ImageButton
-import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback

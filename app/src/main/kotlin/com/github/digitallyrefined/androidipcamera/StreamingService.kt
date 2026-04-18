@@ -37,7 +37,6 @@ import androidx.lifecycle.lifecycleScope
 import androidx.preference.PreferenceManager
 import com.github.digitallyrefined.androidipcamera.helpers.*
 import com.github.digitallyrefined.androidipcamera.helpers.AppLogger
-import com.github.digitallyrefined.androidipcamera.helpers.LogLevel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch

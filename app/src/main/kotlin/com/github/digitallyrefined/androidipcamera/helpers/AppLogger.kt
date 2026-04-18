@@ -35,9 +35,9 @@ object AppLogger {
 
     private const val MAX_ENTRIES = 1_000
 
-    @Suppress("UNCHECKED_CAST")
-    private val entries: MutableList<LogEntry> =
-        Collections.synchronizedList(LinkedList<LogEntry>() as MutableList<LogEntry>)
+    // LinkedList stored directly so we can use removeFirst() for O(1) removal at head.
+    private val rawEntries: LinkedList<LogEntry> = LinkedList()
+    private val entries: MutableList<LogEntry> = Collections.synchronizedList(rawEntries)
 
     private val listeners = CopyOnWriteArrayList<(LogEntry) -> Unit>()
 
@@ -53,7 +53,7 @@ object AppLogger {
         val entry = LogEntry(Date(), level, tag, message, host)
         synchronized(entries) {
             entries.add(entry)
-            if (entries.size > MAX_ENTRIES) (entries as LinkedList<*>).removeFirst()
+            if (entries.size > MAX_ENTRIES) rawEntries.removeFirst()
         }
         // Forward to Android logcat as well
         when (level) {
