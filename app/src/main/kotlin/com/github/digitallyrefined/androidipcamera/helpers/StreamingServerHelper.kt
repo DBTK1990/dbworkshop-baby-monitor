@@ -672,10 +672,12 @@ class StreamingServerHelper(
 
             val uriUsername = userInfo.substringBefore(":")
             val uriPassword = userInfo.substringAfter(":", "")
+            if (uriPassword.isEmpty()) return null
             val validatedUsername = InputValidator.validateAndSanitizeUsername(uriUsername) ?: return null
             val validatedPassword = InputValidator.validateAndSanitizePassword(uriPassword) ?: return null
             "$validatedUsername:$validatedPassword"
         } catch (_: Exception) {
+            onLog("SECURITY: Rejected malformed RTSP URI credentials")
             null
         }
     }
