@@ -381,7 +381,23 @@ class StreamingService : LifecycleService() {
         }
         streamingServerHelper?.startStreamingServer()
         Log.i(TAG, "Requested HTTPS server start on port $STREAM_PORT")
-        CameraRegistrationHelper.register(this, getLocalIpAddress())
+        val localIpAddress = getLocalIpAddress()
+        if (isValidIpv4Address(localIpAddress)) {
+            CameraRegistrationHelper.register(this, localIpAddress)
+        } else {
+            Log.w(TAG, "Skipping camera registration due to invalid local IPv4: $localIpAddress")
+        }
+    }
+
+    private fun isValidIpv4Address(ipAddress: String?): Boolean {
+        if (ipAddress.isNullOrBlank() || ipAddress == "unknown") return false
+        val parts = ipAddress.split(".")
+        if (parts.size != 4) return false
+        return parts.all { part ->
+            part.isNotEmpty() &&
+                part.all(Char::isDigit) &&
+                part.toIntOrNull()?.let { it in 0..255 } == true
+        }
     }
 
     private fun launchMain(block: () -> Unit) {

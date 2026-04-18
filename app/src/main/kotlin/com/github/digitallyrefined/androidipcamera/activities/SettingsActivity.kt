@@ -201,9 +201,21 @@ class SettingsActivity : AppCompatActivity() {
                     editText.hint = "Enter registration token"
                 }
                 setOnPreferenceChangeListener { _, newValue ->
-                    val token = newValue.toString()
-                    if (token.isEmpty()) return@setOnPreferenceChangeListener false
+                    val token = newValue.toString().trim()
+                    val prefsEditor = preferenceManager.sharedPreferences?.edit()
+                    if (token.isEmpty()) {
+                        secureStorage.removeSecureString(SecureStorage.KEY_REGISTRATION_TOKEN)
+                        prefsEditor?.remove("registration_token")?.apply()
+                        Toast.makeText(requireContext(), "Registration token cleared", Toast.LENGTH_SHORT).show()
+                        return@setOnPreferenceChangeListener false
+                    }
                     secureStorage.putSecureString(SecureStorage.KEY_REGISTRATION_TOKEN, token)
+                    prefsEditor?.remove("registration_token")?.apply()
+                    Toast.makeText(
+                        requireContext(),
+                        "Registration token saved securely",
+                        Toast.LENGTH_SHORT
+                    ).show()
                     false
                 }
             }

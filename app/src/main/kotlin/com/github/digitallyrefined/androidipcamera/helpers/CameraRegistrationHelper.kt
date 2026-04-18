@@ -3,6 +3,7 @@ package com.github.digitallyrefined.androidipcamera.helpers
 import android.content.Context
 import android.util.Log
 import androidx.preference.PreferenceManager
+import org.json.JSONObject
 import java.net.URL
 import javax.net.ssl.HttpsURLConnection
 import kotlin.concurrent.thread
@@ -18,18 +19,30 @@ object CameraRegistrationHelper {
         if (url.isBlank() || token.isBlank()) return
 
         thread {
+            var conn: HttpsURLConnection? = null
             try {
-                val conn = URL(url).openConnection() as HttpsURLConnection
+                conn = URL(url).openConnection() as HttpsURLConnection
                 conn.requestMethod = "POST"
                 conn.setRequestProperty("Authorization", "Bearer $token")
-                conn.setRequestProperty("Content-Type", "application/json")
+                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 conn.doOutput = true
                 conn.connectTimeout = 10_000
                 conn.readTimeout = 10_000
-                conn.outputStream.use { it.write("""{"ip":"$ip"}""".toByteArray()) }
-                Log.i(TAG, "Registration HTTP ${conn.responseCode} for IP $ip")
+                val requestBody = JSONObject().put("ip", ip).toString().toByteArray(Charsets.UTF_8)
+                conn.outputStream.use { it.write(requestBody) }
+
+                val responseCode = conn.responseCode
+                if (responseCode in 200..299) {
+                    conn.inputStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                } else {
+                    conn.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                }
+
+                Log.i(TAG, "Registration HTTP $responseCode for IP $ip")
             } catch (e: Exception) {
                 Log.e(TAG, "Registration failed for IP $ip", e)
+            } finally {
+                conn?.disconnect()
             }
         }
     }
