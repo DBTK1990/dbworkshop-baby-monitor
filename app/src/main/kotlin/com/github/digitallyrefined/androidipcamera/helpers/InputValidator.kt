@@ -53,7 +53,7 @@ object InputValidator {
     fun isValidStreamDelay(delay: String): Boolean {
         return try {
             val delayMs = delay.toLong()
-            delayMs in 10..1000 // 10ms to 1 second
+            delayMs in 0..1000 // 0ms to 1 second
         } catch (e: NumberFormatException) {
             false
         }
