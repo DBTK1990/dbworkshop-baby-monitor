@@ -151,7 +151,7 @@ class MainActivity : AppCompatActivity() {
 
         val ipAddressText = findViewById<TextView>(R.id.ipAddressText)
         val ipAddress = getLocalIpAddress()
-        ipAddressText.text = "https://$ipAddress:$STREAM_PORT"
+        ipAddressText.text = "https://$ipAddress:$STREAM_PORT\nrtsp://$ipAddress:$RTSP_PORT/stream"
         showNoClientMessage(true)
 
         findViewById<ImageButton>(R.id.settingsButton).setOnClickListener {
@@ -351,6 +351,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "MainActivity"
         private const val STREAM_PORT = 4444
+        private const val RTSP_PORT = 8554
         private const val REQUEST_CODE_PERMISSIONS = 10
         private val REQUIRED_PERMISSIONS = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             arrayOf(
