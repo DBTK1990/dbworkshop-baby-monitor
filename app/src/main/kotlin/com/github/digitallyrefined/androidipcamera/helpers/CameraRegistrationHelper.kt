@@ -17,6 +17,7 @@ import kotlin.concurrent.thread
 object CameraRegistrationHelper {
     private const val TAG = "CameraRegistration"
     private const val PREF_REGISTRATION_URL = "registration_url"
+    private const val PREF_BYPASS_SSL       = "registration_bypass_ssl"
 
     /**
      * Trust-all TrustManager — used exclusively for the registration endpoint so that
@@ -38,20 +39,21 @@ object CameraRegistrationHelper {
     private val acceptAllHostnames = HostnameVerifier { _, _ -> true }
 
     fun register(context: Context, ip: String) {
-        val prefs = PreferenceManager.getDefaultSharedPreferences(context)
-        val url   = prefs.getString(PREF_REGISTRATION_URL, "").orEmpty().trim()
-        val token = SecureStorage(context).getSecureString(SecureStorage.KEY_REGISTRATION_TOKEN, "").orEmpty().trim()
+        val prefs   = PreferenceManager.getDefaultSharedPreferences(context)
+        val url     = prefs.getString(PREF_REGISTRATION_URL, "").orEmpty().trim()
+        val token   = SecureStorage(context).getSecureString(SecureStorage.KEY_REGISTRATION_TOKEN, "").orEmpty().trim()
+        val bypassSsl = prefs.getBoolean(PREF_BYPASS_SSL, false)
         if (url.isBlank() || token.isBlank()) return
 
         thread {
             var conn: HttpURLConnection? = null
             try {
                 conn = URL(url).openConnection() as HttpURLConnection
-                // If the endpoint is HTTPS, disable SSL verification so that cluster-internal
-                // or self-signed certificates are accepted (intentional, internal service only).
-                if (conn is HttpsURLConnection) {
+                // Apply trust-all SSL only when the user has explicitly opted in via Settings.
+                if (bypassSsl && conn is HttpsURLConnection) {
                     conn.sslSocketFactory = trustAllSslContext.socketFactory
                     conn.hostnameVerifier  = acceptAllHostnames
+                    AppLogger.w(TAG, "SSL verification disabled for registration endpoint (bypass enabled in Settings)")
                 }
                 conn.requestMethod = "POST"
                 conn.setRequestProperty("Authorization", "Bearer $token")
@@ -71,7 +73,7 @@ object CameraRegistrationHelper {
                     AppLogger.w(TAG, "Registration HTTP $code for IP $ip")
                 }
             } catch (e: Exception) {
-                AppLogger.e(TAG, "Registration failed for IP $ip: ${e.message}")
+                AppLogger.e(TAG, "Registration failed for IP $ip: ${e.javaClass.simpleName}: ${e.message}")
             } finally {
                 conn?.disconnect()
             }

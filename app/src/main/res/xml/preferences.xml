@@ -29,6 +29,11 @@
             android:summary="Bearer token sent to the registration endpoint"
             android:inputType="textPassword"
             android:singleLine="true" />
+        <SwitchPreference
+            android:key="registration_bypass_ssl"
+            android:title="Bypass SSL Verification"
+            android:summary="Accept self-signed or internal CA certificates for the registration endpoint. Enable only when your server uses a private certificate."
+            android:defaultValue="false" />
     </PreferenceCategory>
 
     <PreferenceCategory android:title="Certificate Settings">
