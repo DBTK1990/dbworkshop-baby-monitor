@@ -391,6 +391,7 @@ class StreamingService : LifecycleService() {
 
     private fun isValidIpv4Address(ipAddress: String?): Boolean {
         if (ipAddress.isNullOrBlank() || ipAddress == "unknown") return false
+        if (ipAddress.startsWith(".") || ipAddress.endsWith(".") || ipAddress.contains("..")) return false
         val parts = ipAddress.split(".")
         if (parts.size != 4) return false
         return parts.all { part ->
