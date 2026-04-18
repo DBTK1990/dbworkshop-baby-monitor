@@ -8,7 +8,6 @@ import java.util.Date
 import java.util.LinkedList
 import java.util.Locale
 import java.util.concurrent.CopyOnWriteArrayList
-import java.util.TimeZone
 
 enum class LogLevel(val label: String, val color: Int) {
     VERBOSE("VERBOSE", Color.parseColor("#B0B0B0")),
@@ -44,9 +43,7 @@ object AppLogger {
 
     // One formatter per thread — avoids allocating a new SimpleDateFormat on every formatCLF() call.
     private val clfFormatter: ThreadLocal<SimpleDateFormat> = ThreadLocal.withInitial {
-        SimpleDateFormat("dd/MMM/yyyy:HH:mm:ss Z", Locale.US).also { sdf ->
-            sdf.timeZone = TimeZone.getDefault()
-        }
+        SimpleDateFormat("dd/MMM/yyyy:HH:mm:ss Z", Locale.US)
     }
 
     // ---------- public logging API ----------

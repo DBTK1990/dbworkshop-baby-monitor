@@ -423,12 +423,12 @@ class MainActivity : AppCompatActivity() {
         /** Append one new entry (called from the AppLogger listener). */
         fun addEntry(entry: LogEntry, regex: Regex?) {
             if (regex != null && !matches(entry, regex)) return
-            displayedEntries.add(entry)
-            // Mirror AppLogger's own cap so the adapter never grows unbounded.
-            if (displayedEntries.size > AppLogger.MAX_ENTRIES) {
+            // Trim the oldest visible entry first to keep the list at MAX_ENTRIES.
+            if (displayedEntries.size >= AppLogger.MAX_ENTRIES) {
                 displayedEntries.removeAt(0)
                 notifyItemRemoved(0)
             }
+            displayedEntries.add(entry)
             notifyItemInserted(displayedEntries.size - 1)
             logRecyclerView.scrollToPosition(displayedEntries.size - 1)
         }
