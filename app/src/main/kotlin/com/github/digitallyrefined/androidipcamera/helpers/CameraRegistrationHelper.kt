@@ -4,8 +4,8 @@ import android.content.Context
 import android.util.Log
 import androidx.preference.PreferenceManager
 import org.json.JSONObject
+import java.net.HttpURLConnection
 import java.net.URL
-import javax.net.ssl.HttpsURLConnection
 import kotlin.concurrent.thread
 
 object CameraRegistrationHelper {
@@ -14,14 +14,14 @@ object CameraRegistrationHelper {
 
     fun register(context: Context, ip: String) {
         val prefs = PreferenceManager.getDefaultSharedPreferences(context)
-        val url = prefs.getString(PREF_REGISTRATION_URL, "").orEmpty()
-        val token = SecureStorage(context).getSecureString(SecureStorage.KEY_REGISTRATION_TOKEN, "").orEmpty()
+        val url = prefs.getString(PREF_REGISTRATION_URL, "").orEmpty().trim()
+        val token = SecureStorage(context).getSecureString(SecureStorage.KEY_REGISTRATION_TOKEN, "").orEmpty().trim()
         if (url.isBlank() || token.isBlank()) return
 
         thread {
-            var conn: HttpsURLConnection? = null
+            var conn: HttpURLConnection? = null
             try {
-                conn = URL(url).openConnection() as HttpsURLConnection
+                conn = URL(url).openConnection() as HttpURLConnection
                 conn.requestMethod = "POST"
                 conn.setRequestProperty("Authorization", "Bearer $token")
                 conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
