@@ -151,7 +151,7 @@ class MainActivity : AppCompatActivity() {
 
         val ipAddressText = findViewById<TextView>(R.id.ipAddressText)
         val ipAddress = getLocalIpAddress()
-        ipAddressText.text = "https://$ipAddress:$STREAM_PORT\nrtsp://$ipAddress:$RTSP_PORT/stream"
+        ipAddressText.text = "https://$ipAddress:$STREAM_PORT\nrtsp://<username>:<password>@$ipAddress:$RTSP_PORT/stream"
         showNoClientMessage(true)
 
         findViewById<ImageButton>(R.id.settingsButton).setOnClickListener {
