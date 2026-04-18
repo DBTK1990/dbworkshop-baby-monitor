@@ -29,6 +29,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.io.PrintWriter
 import java.net.InetAddress
+import java.net.URI
 import java.net.ServerSocket
 import java.net.Socket
 import java.nio.ByteBuffer
@@ -451,7 +452,7 @@ class StreamingServerHelper(
                     ?.trim()
                     ?: "1"
 
-                if (!isRtspAuthenticated(headers, clientIp)) {
+                if (!isRtspAuthenticated(headers, uri, clientIp)) {
                     sendRtspResponse(
                         outputStream = outputStream,
                         statusLine = "RTSP/1.0 401 Unauthorized",
@@ -623,7 +624,7 @@ class StreamingServerHelper(
         sendRtspJpegFrame(jpegBytes)
     }
 
-    private fun isRtspAuthenticated(headers: List<String>, clientIp: String): Boolean {
+    private fun isRtspAuthenticated(headers: List<String>, requestUri: String, clientIp: String): Boolean {
         val secureStorage = SecureStorage(context)
         val rawUsername = secureStorage.getSecureString(SecureStorage.KEY_USERNAME, "") ?: ""
         val rawPassword = secureStorage.getSecureString(SecureStorage.KEY_PASSWORD, "") ?: ""
@@ -638,16 +639,20 @@ class StreamingServerHelper(
         val authValue = headers.find { it.startsWith("Authorization:", ignoreCase = true) }
             ?.substringAfter(":")
             ?.trim()
-            ?: return false
-        if (!authValue.startsWith("Basic ", ignoreCase = true)) {
-            recordFailedAttempt(clientIp)
-            return false
-        }
-        val decodedAuth = try {
-            String(Base64.decode(authValue.substringAfter("Basic ", ""), Base64.DEFAULT))
-        } catch (_: Exception) {
-            recordFailedAttempt(clientIp)
-            return false
+        val decodedAuth = when {
+            authValue != null && authValue.startsWith("Basic ", ignoreCase = true) -> {
+                try {
+                    String(Base64.decode(authValue.substringAfter("Basic ", ""), Base64.DEFAULT))
+                } catch (_: Exception) {
+                    recordFailedAttempt(clientIp)
+                    return false
+                }
+            }
+            authValue != null -> {
+                recordFailedAttempt(clientIp)
+                return false
+            }
+            else -> parseRtspUriUserInfo(requestUri) ?: return false
         }
         val valid = decodedAuth == "$username:$password"
         if (!valid) {
@@ -655,6 +660,26 @@ class StreamingServerHelper(
             onLog("SECURITY: Failed RTSP auth attempt from $clientIp")
         }
         return valid
+    }
+
+    private fun parseRtspUriUserInfo(requestUri: String): String? {
+        if (!requestUri.startsWith("rtsp://", ignoreCase = true)) {
+            return null
+        }
+        return try {
+            val userInfo = URI(requestUri).userInfo ?: return null
+            if (!userInfo.contains(":")) return null
+
+            val uriUsername = userInfo.substringBefore(":")
+            val uriPassword = userInfo.substringAfter(":", "")
+            if (uriPassword.isEmpty()) return null
+            val validatedUsername = InputValidator.validateAndSanitizeUsername(uriUsername) ?: return null
+            val validatedPassword = InputValidator.validateAndSanitizePassword(uriPassword) ?: return null
+            "$validatedUsername:$validatedPassword"
+        } catch (_: Exception) {
+            onLog("SECURITY: Rejected malformed RTSP URI credentials")
+            null
+        }
     }
 
     private fun sendRtspResponse(
