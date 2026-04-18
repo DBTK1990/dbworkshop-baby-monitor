@@ -112,6 +112,7 @@ class StreamingServerHelper(
     private val JPEG_TYPE_BASELINE_DCT = 0x01
     private val JPEG_QUALITY_FACTOR = 75
     private val RTSP_SESSION_TIMEOUT_SECONDS = 60
+    private val RTSP_SERVER_VERSION = "AndroidIPCamera/1.0"
     private val random = SecureRandom()
 
     fun getClients(): List<Client> = clients.toList()
@@ -508,7 +509,7 @@ class StreamingServerHelper(
                             outputStream = outputStream,
                             rtpChannel = rtpChannel,
                             rtcpChannel = rtcpChannel,
-                            ssrc = existingSession?.ssrc ?: random.nextInt(),
+                            ssrc = existingSession?.ssrc ?: (random.nextInt() and Int.MAX_VALUE),
                             sequenceNumber = existingSession?.sequenceNumber ?: 0
                         )
                         rtspClients[currentSessionId] = client
@@ -667,7 +668,7 @@ class StreamingServerHelper(
         val response = StringBuilder().apply {
             append(statusLine).append("\r\n")
             append("CSeq: ").append(cSeq).append("\r\n")
-            append("Server: AndroidIPCamera/1.0\r\n")
+            append("Server: $RTSP_SERVER_VERSION\r\n")
             headers.forEach { (key, value) ->
                 append(key).append(": ").append(value).append("\r\n")
             }
@@ -801,7 +802,7 @@ a=control:$normalizedUri
         packet[13] = ((offset shr 16) and 0xFF).toByte()
         packet[14] = ((offset shr 8) and 0xFF).toByte()
         packet[15] = (offset and 0xFF).toByte()
-        packet[16] = JPEG_TYPE_BASELINE_DCT.toByte() // JPEG type for baseline DCT
+        packet[16] = JPEG_TYPE_BASELINE_DCT.toByte()
         packet[17] = JPEG_QUALITY_FACTOR.toByte()
         packet[18] = widthBlocks.toByte()
         packet[19] = heightBlocks.toByte()
