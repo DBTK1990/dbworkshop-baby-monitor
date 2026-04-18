@@ -72,7 +72,7 @@ class StreamingServerHelper(
         val outputStream: OutputStream,
         val rtpChannel: Int,
         val rtcpChannel: Int,
-        val ssrc: Int = SecureRandom().nextInt(),
+        val ssrc: Int,
         var sequenceNumber: Int = 0,
         var isPlaying: Boolean = false
     )
@@ -106,6 +106,7 @@ class StreamingServerHelper(
     private val RTP_MAX_PACKET_SIZE = 1400
     private val DEFAULT_JPEG_WIDTH = 640
     private val DEFAULT_JPEG_HEIGHT = 480
+    private val random = SecureRandom()
 
     fun getClients(): List<Client> = clients.toList()
     fun hasAnyStreamingClients(): Boolean = clients.isNotEmpty() || rtspClients.values.any { it.isPlaying }
@@ -494,12 +495,15 @@ class StreamingServerHelper(
                         }
                         val (rtpChannel, rtcpChannel) = parseInterleavedChannels(transportHeader)
                         val currentSessionId = sessionId ?: java.util.UUID.randomUUID().toString()
+                        val existingSession = rtspClients[currentSessionId]
                         val client = RtspClient(
                             sessionId = currentSessionId,
                             socket = socket,
                             outputStream = outputStream,
                             rtpChannel = rtpChannel,
-                            rtcpChannel = rtcpChannel
+                            rtcpChannel = rtcpChannel,
+                            ssrc = existingSession?.ssrc ?: random.nextInt(),
+                            sequenceNumber = existingSession?.sequenceNumber ?: 0
                         )
                         rtspClients[currentSessionId] = client
                         sessionId = currentSessionId
@@ -719,7 +723,7 @@ a=control:$normalizedUri
         val widthBlocks = (dimensions.first / 8).coerceIn(0, 255)
         val heightBlocks = (dimensions.second / 8).coerceIn(0, 255)
         val timestamp = currentRtpTimestamp()
-        val maxPayload = RTP_MAX_PACKET_SIZE - 20 // RTP packet budget minus fixed 20-byte RTP+JPEG headers
+        val maxPayload = RTP_MAX_PACKET_SIZE - 20 // 12-byte RTP header + 8-byte JPEG payload header
         val clientsToRemove = mutableListOf<String>()
 
         playingClients.forEach { client ->
@@ -789,7 +793,7 @@ a=control:$normalizedUri
         packet[14] = ((offset shr 8) and 0xFF).toByte()
         packet[15] = (offset and 0xFF).toByte()
         packet[16] = 0x01 // JPEG type for baseline DCT
-        packet[17] = 0xFF.toByte()
+        packet[17] = 75.toByte()
         packet[18] = widthBlocks.toByte()
         packet[19] = heightBlocks.toByte()
         System.arraycopy(jpegBytes, offset, packet, 20, length)
