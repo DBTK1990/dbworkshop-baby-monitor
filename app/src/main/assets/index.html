@@ -170,6 +170,8 @@
       <div class='main'>
         <div class='stream-container' id='streamContainer'>
           <div id="streamModeIndicator" class="stream-mode-indicator"></div>
+          <canvas id='streamCanvas'></canvas>
+          <audio id="audioEl" preload="none" muted></audio>
         </div>
 
       <div class='controls-panel'>
@@ -187,6 +189,11 @@
           <div style="margin-bottom: 15px">
             <button id="muteBtn" class="btn btn-action" style='width: 49%;'>🔇 Unmute Audio</button>
             <button id="flashBtn" class="btn btn-action" style='width: 49%;'>💡 Flash On</button>
+          </div>
+
+          <div id="avDelayContainer">
+            <label for="avDelay">AV Sync Delay <span class='val-badge' id='avDelayVal'>2.0s</span></label>
+            <input type='range' id='avDelay' min='0' max='5' step='0.1' value='2.5'>
           </div>
 
           <label for="resolutionSelect">Resolution</label>
@@ -209,7 +216,7 @@
           <input id="contrast" type='range' min='-50' max='50' step='10' value='{{CUR_CONTRAST}}' oninput='document.getElementById("contVal").innerText=this.value;fetch("/?contrast="+this.value)'>
 
           <label for="delay">Frame Delay (ms)</label>
-          <input id="delay" type='number' min='0' max='1000' value='{{CUR_DELAY}}' onchange='fetch("/?delay="+this.value)'>
+          <input id="delay" type='number' min='10' max='1000' value='{{CUR_DELAY}}' onchange='fetch("/?delay="+this.value)'>
         </div>
 
         <p class="notice">Some changes will momentarily restart the camera.</p>
@@ -218,160 +225,389 @@
 
     <script>
       let currentCamera = '{{CUR_CAMERA}}';
+      const audioEl = document.getElementById('audioEl');
+      const muteBtn = document.getElementById('muteBtn');
+      const avDelayContainer = document.getElementById('avDelayContainer');
+      const streamContainer = document.getElementById('streamContainer');
+      const streamModeIndicator = document.getElementById('streamModeIndicator');
+      const avDelay = document.getElementById('avDelay');
+      const avDelayVal = document.getElementById('avDelayVal');
+      const STREAM_SRC = '/stream';
+      let videoDelayMs = 2500;
+      let mjpegAbort = null;
+      let mjpegRunning = false;
+      let frameQueue = [];
+      let lastDrawn = null;
+      let drawing = false;
       let viewMode = 'fit';
       let torchState = ('{{CUR_TORCH}}' === 'on') ? 'on' : 'off';
       let pc = null;
       let webrtcActive = false;
-      let reconnectTimer = null;
-
-      const streamContainer = document.getElementById('streamContainer');
-      const streamModeIndicator = document.getElementById('streamModeIndicator');
-
-      // WebRTC video element — added dynamically so it fills the stream container
-      const rtcVideo = document.createElement('video');
-      rtcVideo.autoplay = true;
-      rtcVideo.playsInline = true;
-      rtcVideo.muted = true;
-      rtcVideo.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain;display:block;';
-      streamContainer.appendChild(rtcVideo);
+      const streamModeConfigs = {
+        webrtc: { label: 'WebRTC', borderColor: '#2ecc71' },
+        'mjpeg-fallback': { label: 'MJPEG fallback', borderColor: '#f39c12' },
+        connecting: { label: 'Connecting...', borderColor: '#666' }
+      };
 
       function setStreamMode(mode) {
-        const configs = {
-          webrtc:      { label: 'WebRTC',         borderColor: '#2ecc71' },
-          connecting:  { label: 'Connecting...',   borderColor: '#666'    },
-          error:       { label: 'Reconnecting...', borderColor: '#e74c3c' }
-        };
-        const config = configs[mode] || configs.connecting;
+        const config = streamModeConfigs[mode] || streamModeConfigs.connecting;
         streamModeIndicator.textContent = config.label;
         streamModeIndicator.style.borderColor = config.borderColor;
       }
       setStreamMode('connecting');
 
-      function setView(mode) {
-        const f = document.getElementById('fitBtn');
-        const o = document.getElementById('origBtn');
-        viewMode = mode;
-        if (mode === 'fit') {
-          f.className = 'btn active';
-          o.className = 'btn';
-          rtcVideo.style.maxWidth  = '100%';
-          rtcVideo.style.maxHeight = '100%';
-          rtcVideo.style.width     = '';
-          rtcVideo.style.height    = '';
-          rtcVideo.style.objectFit = 'contain';
+      function targetCanvasSize(frame) {
+        if (viewMode === 'fit') {
+          const w = (streamContainer && streamContainer.clientWidth)
+            ? streamContainer.clientWidth
+            : (frame ? frame.width : (lastDrawn ? lastDrawn.width : streamCanvas.width));
+          const h = (streamContainer && streamContainer.clientHeight)
+            ? streamContainer.clientHeight
+            : (frame ? frame.height : (lastDrawn ? lastDrawn.height : streamCanvas.height));
+          return { w, h };
         } else {
-          f.className = 'btn';
-          o.className = 'btn active';
-          const vw = rtcVideo.videoWidth  || 0;
-          const vh = rtcVideo.videoHeight || 0;
-          if (vw && vh) {
-            rtcVideo.style.maxWidth  = 'none';
-            rtcVideo.style.maxHeight = 'none';
-            rtcVideo.style.width     = vw + 'px';
-            rtcVideo.style.height    = vh + 'px';
-          }
+          const w = frame ? frame.width : (lastDrawn ? lastDrawn.width : streamCanvas.width);
+          const h = frame ? frame.height : (lastDrawn ? lastDrawn.height : streamCanvas.height);
+          return { w, h };
         }
       }
 
-      function updateCameraToggleBtn() {
-        const backBtn  = document.getElementById('backBtn');
-        const frontBtn = document.getElementById('frontBtn');
-        if (currentCamera === 'front') {
-          backBtn.className  = 'btn';
-          frontBtn.className = 'btn active';
-        } else {
-          backBtn.className  = 'btn active';
-          frontBtn.className = 'btn';
+      function applyCanvasSize(size) {
+        if (!size) return;
+        if (streamCanvas.width !== size.w || streamCanvas.height !== size.h) {
+          streamCanvas.width = size.w;
+          streamCanvas.height = size.h;
         }
       }
 
-      function setCamera(camera) {
-        fetch('/?camera=' + camera);
-        currentCamera = camera;
-        updateCameraToggleBtn();
-      }
+      function updateMuteButton() {
+        muteBtn.textContent = audioEl.muted
+          ? '🔇 Unmute Audio'
+          : '🔊 Mute Audio';
 
-      updateCameraToggleBtn();
+        avDelayContainer.style.display = audioEl.muted
+          ? 'none'
+          : 'block';
+      }
 
       const flashBtn = document.getElementById('flashBtn');
       function updateFlashButton() {
         if (!flashBtn) return;
-        flashBtn.textContent = (torchState === 'on') ? '⚡ Flash Off' : '💡 Flash On';
+        flashBtn.textContent = (torchState === 'on')
+          ? '⚡ Flash Off'
+          : '💡 Flash On';
       }
+
       if (flashBtn) {
         flashBtn.addEventListener('click', () => {
           const next = (torchState === 'on') ? 'off' : 'on';
-          fetch('/?torch=' + next).catch(() => {});
+          try {
+            fetch('/?torch=' + next).catch(() => {});
+          } catch (_) {}
           torchState = next;
           updateFlashButton();
         });
         updateFlashButton();
       }
 
-      // Mute button controls WebRTC audio track
-      const muteBtn = document.getElementById('muteBtn');
-      function updateMuteButton() {
-        if (!muteBtn) return;
-        muteBtn.textContent = rtcVideo.muted ? '\uD83D\uDD07 Unmute Audio' : '\uD83D\uDD0A Mute Audio';
-      }
-      if (muteBtn) {
-        muteBtn.addEventListener('click', () => {
-          rtcVideo.muted = !rtcVideo.muted;
-          updateMuteButton();
-        });
+      function restoreMjpegAudioControls() {
+        muteBtn.onclick = () => {
+          const willUnmute = audioEl.muted;
+          if (willUnmute) {
+            // Preflight check to detect 403 without toggling UI state
+            const controller = new AbortController();
+            fetch('/audio', {
+              method: 'GET',
+              cache: 'no-store',
+              credentials: 'include',
+              signal: controller.signal
+            }).then(res => {
+              if (res && res.status === 403) {
+                alert('Audio is disabled because microphone permission is not granted.');
+                return;
+              }
+              try { controller.abort(); } catch (_) {}
+              if (!audioEl.src) {
+                audioEl.src = '/audio';
+                audioEl.load();
+              }
+              audioEl.muted = false;
+              audioEl.play().catch(() => {});
+              updateMuteButton();
+            }).catch(() => {
+              // Network or other error: keep muted and do not toggle button
+            });
+          } else {
+            audioEl.muted = true;
+            audioEl.pause();
+            audioEl.removeAttribute('src');
+            audioEl.load();
+            updateMuteButton();
+          }
+        };
         updateMuteButton();
       }
+      restoreMjpegAudioControls();
 
-      // ── WebRTC ────────────────────────────────────────────────────────────────
+      if (avDelay && avDelayVal) {
+        avDelay.addEventListener('input', () => {
+          avDelayVal.textContent = `${avDelay.value}s`;
+          videoDelayMs = Math.max(0, (parseFloat(avDelay.value) || 0) * 1000);
+        });
+        avDelayVal.textContent = `${avDelay.value}s`;
+        videoDelayMs = Math.max(0, (parseFloat(avDelay.value) || 0) * 1000);
+      }
+
+      function startMjpegStream() {
+        if (!streamCanvas)
+          return;
+        if (mjpegRunning && mjpegAbort) {
+          return;
+        }
+        if (mjpegAbort)
+          mjpegAbort.abort();
+        const controller = new AbortController();
+        mjpegAbort = controller;
+        mjpegRunning = true;
+        setStreamMode('mjpeg-fallback');
+        frameQueue = [];
+        lastDrawn = null;
+        const ctx = streamCanvas.getContext('2d');
+        fetch(STREAM_SRC, {
+          cache: 'no-store',
+          credentials: 'include',
+          signal: controller.signal
+        })
+          .then(res => {
+            const reader = res
+              .body
+              .getReader();
+            let buffer = new Uint8Array(0);
+            function concat(a, b) {
+              const c = new Uint8Array(a.length + b.length);
+              c.set(a, 0);
+              c.set(b, a.length);
+              return c;
+            }
+            function findMarker(buf, marker) {
+              for (let i = 0; i < buf.length - 1; i++) {
+                if (buf[i] === 0xFF && buf[i + 1] === marker)
+                  return i;
+                }
+              return -1;
+            }
+            function process() {
+              while (true) {
+                const soi = findMarker(buffer, 0xD8);
+                if (soi < 0)
+                  break;
+                const rest = buffer.subarray(soi);
+                const eoiRel = findMarker(rest, 0xD9);
+                if (eoiRel < 0)
+                  break;
+                const eoi = soi + eoiRel + 2;
+                const frameBytes = buffer.subarray(soi, eoi);
+                buffer = buffer.subarray(eoi);
+                const blob = new Blob([frameBytes], {type: 'image/jpeg'});
+                createImageBitmap(blob)
+                  .then(bitmap => {
+                    frameQueue.push({ts: performance.now(), bmp: bitmap});
+                    if (frameQueue.length > 180)
+                      frameQueue.shift();
+                    }
+                  )
+                  .catch(() => {});
+              }
+            }
+            function pump() {
+              return reader
+                .read()
+                .then(({done, value}) => {
+                  if (done)
+                    return;
+                  if (value && value.length) {
+                    buffer = concat(buffer, value);
+                    process();
+                  }
+                  return pump();
+                });
+            }
+            pump().catch(() => { mjpegRunning = false; });
+            function drawLoop() {
+              if (!drawing)
+                return;
+              const now = performance.now();
+              const effDelay = (audioEl && !audioEl.muted)
+                ? videoDelayMs
+                : 0;
+              let candidate = null;
+              while (frameQueue.length && frameQueue[0].ts <= now - effDelay) {
+                candidate = frameQueue.shift();
+              }
+              if (!candidate && frameQueue.length) {
+                const idx = frameQueue.findIndex(f => f.ts > now - effDelay);
+                if (idx > 0) {
+                  candidate = frameQueue
+                    .splice(0, idx)
+                    .pop() || null;
+                }
+              }
+              if (candidate && candidate.bmp) {
+                const size = targetCanvasSize(candidate.bmp);
+                const w = size.w;
+                const h = size.h;
+                applyCanvasSize(size);
+                const iw = candidate.bmp.width;
+                const ih = candidate.bmp.height;
+                const scale = Math.min(w / iw, h / ih);
+                const dw = Math.max(1, Math.floor(iw * scale));
+                const dh = Math.max(1, Math.floor(ih * scale));
+                const dx = Math.floor((w - dw) / 2);
+                const dy = Math.floor((h - dh) / 2);
+                ctx.clearRect(0, 0, w, h);
+                ctx.drawImage(candidate.bmp, dx, dy, dw, dh);
+                lastDrawn = candidate.bmp;
+              }
+              requestAnimationFrame(drawLoop);
+            }
+            if (!drawing) {
+              drawing = true;
+              requestAnimationFrame(drawLoop);
+            }
+          })
+          .catch(() => { mjpegRunning = false; });
+      }
+      // Try WebRTC first; 4s safety net starts MJPEG if WebRTC fails to connect
+      startWebRTC();
+      setTimeout(() => { if (!webrtcActive) startMjpegStream(); }, 4000);
+
+      function stopMjpegStream() {
+        if (mjpegAbort) {
+          try { mjpegAbort.abort(); } catch (_) {}
+        }
+        mjpegAbort = null;
+        mjpegRunning = false;
+      }
+
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+          // Stop all streams when backgrounded
+          if (!audioEl.muted) {
+            audioEl.muted = true;
+            audioEl.pause();
+          }
+          if (audioEl.src) {
+            audioEl.removeAttribute('src');
+            audioEl.load();
+          }
+          closeWebRTC();
+          stopMjpegStream();
+        } else {
+          // Restart stream on foreground — prefer WebRTC
+          if (!webrtcActive) {
+            startWebRTC();
+            setTimeout(() => { if (!webrtcActive) startMjpegStream(); }, 4000);
+          }
+        }
+      });
+
+      function updateCameraToggleBtn() {
+        const backBtn = document.getElementById('backBtn');
+        const frontBtn = document.getElementById('frontBtn');
+        if (currentCamera === 'front') {
+          backBtn.className = 'btn';
+          frontBtn.className = 'btn active';
+        } else {
+          backBtn.className = 'btn active';
+          frontBtn.className = 'btn';
+        }
+      }
+
+      function setCamera(camera) {
+        fetch("/?camera=" + camera);
+        currentCamera = camera;
+        updateCameraToggleBtn();
+      }
+
+      updateCameraToggleBtn();
+
+      function setView(mode) {
+        const f = document.getElementById('fitBtn');
+        const o = document.getElementById('origBtn');
+
+        if (mode === 'fit') {
+          f.className = 'btn active';
+          o.className = 'btn';
+          viewMode = 'fit';
+        } else {
+          f.className = 'btn';
+          o.className = 'btn active';
+          viewMode = 'original';
+        }
+        applyCanvasSize(targetCanvasSize(lastDrawn));
+      }
+
+      // ── WebRTC client — low-latency combined audio+video ──────────────────
+      const rtcVideo = document.createElement('video');
+      rtcVideo.autoplay = true;
+      rtcVideo.playsInline = true;
+      rtcVideo.muted = true;
+      rtcVideo.style.cssText = 'max-width:100%;max-height:100%;display:none;object-fit:contain;';
+      streamContainer.appendChild(rtcVideo);
+      const streamCanvas = document.getElementById('streamCanvas');
       let rtcRemoteStream = null;
 
       async function startWebRTC() {
         if (pc) return;
-        clearTimeout(reconnectTimer);
-        setStreamMode('connecting');
         try {
+          setStreamMode('connecting');
           pc = new RTCPeerConnection({
             iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
             bundlePolicy: 'max-bundle'
           });
           const currentPc = pc;
-          currentPc.addTransceiver('video', { direction: 'recvonly' });
-          currentPc.addTransceiver('audio', { direction: 'recvonly' });
+          pc.addTransceiver('video', { direction: 'recvonly' });
+          pc.addTransceiver('audio', { direction: 'recvonly' });
 
           currentPc.ontrack = (e) => {
             if (e.streams && e.streams[0]) {
               rtcRemoteStream = e.streams[0];
             } else if (e.track) {
               if (!rtcRemoteStream) rtcRemoteStream = new MediaStream();
-              if (!rtcRemoteStream.getTracks().some(t => t.id === e.track.id)) {
-                rtcRemoteStream.addTrack(e.track);
-              }
+              const alreadyPresent = rtcRemoteStream.getTracks().some(t => t.id === e.track.id);
+              if (!alreadyPresent) rtcRemoteStream.addTrack(e.track);
             }
             if (!rtcRemoteStream) return;
             rtcVideo.srcObject = rtcRemoteStream;
+            rtcVideo.style.display = 'block';
+            streamCanvas.style.display = 'none';
             webrtcActive = true;
             setStreamMode('webrtc');
-            if (viewMode === 'original' && rtcVideo.videoWidth) {
-              rtcVideo.style.maxWidth  = 'none';
-              rtcVideo.style.maxHeight = 'none';
-              rtcVideo.style.width     = rtcVideo.videoWidth  + 'px';
-              rtcVideo.style.height    = rtcVideo.videoHeight + 'px';
-            }
+            drawing = false;
+            stopMjpegStream();
+            // Hide AV-sync delay slider — WebRTC handles A/V sync via RTP timestamps
+            avDelayContainer.style.display = 'none';
+            // Remap mute button to WebRTC video element
+            muteBtn.textContent = '\uD83D\uDD07 Unmute Audio';
+            muteBtn.onclick = () => {
+              rtcVideo.muted = !rtcVideo.muted;
+              muteBtn.textContent = rtcVideo.muted ? '\uD83D\uDD07 Unmute Audio' : '\uD83D\uDD0A Mute Audio';
+            };
           };
 
           currentPc.oniceconnectionstatechange = () => {
             if (pc !== currentPc) return;
-            const s = currentPc.iceConnectionState;
-            if (['disconnected', 'failed', 'closed'].includes(s)) {
+            const iceState = currentPc.iceConnectionState;
+            if (['disconnected', 'failed', 'closed'].includes(iceState)) {
               closeWebRTC();
-              scheduleReconnect();
+              if (!mjpegRunning) startMjpegStream();
             }
           };
 
           const offer = await currentPc.createOffer();
           await currentPc.setLocalDescription(offer);
 
-          // Wait for ICE gathering to finish (LAN: ~50 ms, max 2 s)
+          // Wait for ICE gathering to finish (LAN: ~50ms, timeout 2s)
           await new Promise(resolve => {
             if (currentPc.iceGatheringState === 'complete') { resolve(); return; }
             const check = () => {
@@ -395,9 +631,9 @@
           await currentPc.setRemoteDescription(new RTCSessionDescription({ sdp, type }));
 
         } catch (err) {
-          console.warn('WebRTC failed:', err);
+          console.warn('WebRTC failed, falling back to MJPEG:', err);
           closeWebRTC();
-          scheduleReconnect();
+          if (!mjpegRunning) startMjpegStream();
         }
       }
 
@@ -405,27 +641,12 @@
         if (pc) { try { pc.close(); } catch (_) {} pc = null; }
         rtcVideo.srcObject = null;
         rtcRemoteStream = null;
+        rtcVideo.style.display = 'none';
+        streamCanvas.style.display = '';
+        restoreMjpegAudioControls();
         webrtcActive = false;
-        setStreamMode('connecting');
+        setStreamMode(mjpegRunning ? 'mjpeg-fallback' : 'connecting');
       }
-
-      function scheduleReconnect() {
-        clearTimeout(reconnectTimer);
-        reconnectTimer = null;
-        setStreamMode('error');
-        reconnectTimer = setTimeout(startWebRTC, 3000);
-      }
-
-      startWebRTC();
-
-      document.addEventListener('visibilitychange', () => {
-        if (document.hidden) {
-          closeWebRTC();
-          clearTimeout(reconnectTimer);
-        } else if (!webrtcActive) {
-          startWebRTC();
-        }
-      });
     </script>
   </body>
 </html>
