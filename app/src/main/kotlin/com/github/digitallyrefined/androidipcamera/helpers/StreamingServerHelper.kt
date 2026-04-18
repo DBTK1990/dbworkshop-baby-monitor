@@ -652,7 +652,14 @@ class StreamingServerHelper(
                 recordFailedAttempt(clientIp)
                 return false
             }
-            else -> parseRtspUriUserInfo(requestUri) ?: return false
+            else -> {
+                val uriUserInfo = parseRtspUriUserInfo(requestUri)
+                if (uriUserInfo == null) {
+                    recordFailedAttempt(clientIp)
+                    return false
+                }
+                uriUserInfo
+            }
         }
         val valid = decodedAuth == "$username:$password"
         if (!valid) {
