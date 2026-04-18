@@ -41,7 +41,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.IOException
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.security.SecureRandom
@@ -366,7 +365,7 @@ class StreamingService : LifecycleService() {
                     }
                 },
                 onClientDisconnected = {
-                    if (streamingServerHelper?.getClients()?.isEmpty() == true &&
+                    if (streamingServerHelper?.hasAnyStreamingClients() != true &&
                         webRtcManager?.hasPeers() != true) {
                         launchMain {
                             stopCamera()
@@ -449,7 +448,7 @@ class StreamingService : LifecycleService() {
                 .also { analysis ->
                     cameraExecutor?.let { executor ->
                         analysis.setAnalyzer(executor) { image ->
-                            if (streamingServerHelper?.getClients()?.isNotEmpty() == true ||
+                            if (streamingServerHelper?.hasAnyStreamingClients() == true ||
                                 webRtcManager?.hasPeers() == true) {
                                 processImage(image)
                             }
@@ -678,23 +677,7 @@ class StreamingService : LifecycleService() {
             }
         }
 
-        streamingServerHelper?.getClients()?.let { clients ->
-            val toRemove = mutableListOf<StreamingServerHelper.Client>()
-            clients.forEach { client ->
-                try {
-                    client.writer.print("--frame\r\n")
-                    client.writer.print("Content-Type: image/jpeg\r\n")
-                    client.writer.print("Content-Length: ${jpegBytes.size}\r\n\r\n")
-                    client.writer.flush()
-                    client.outputStream.write(jpegBytes)
-                    client.outputStream.flush()
-                } catch (e: IOException) {
-                    try { client.socket.close() } catch (_: Exception) {}
-                    toRemove.add(client)
-                }
-            }
-            toRemove.forEach { streamingServerHelper?.removeClient(it) }
-        }
+        streamingServerHelper?.broadcastFrame(jpegBytes)
 
         // Feed WebRTC peers with the fully transformed frame
         cameraXVideoSource?.pushFrame(jpegBytes, image.width, image.height, totalRotation)
