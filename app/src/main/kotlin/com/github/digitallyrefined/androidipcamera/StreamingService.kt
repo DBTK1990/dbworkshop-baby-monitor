@@ -394,10 +394,10 @@ class StreamingService : LifecycleService() {
         val parts = ipAddress.split(".")
         if (parts.size != 4) return false
         return parts.all { part ->
-            part.isNotEmpty() &&
-                (part == "0" || !part.startsWith("0")) &&
-                part.all(Char::isDigit) &&
-                part.toIntOrNull()?.let { it in 0..255 } == true
+            if (part.isEmpty() || !part.all(Char::isDigit)) return@all false
+            if (part.length > 1 && part.startsWith("0")) return@all false
+            val octet = part.toIntOrNull() ?: return@all false
+            octet in 0..255
         }
     }
 
