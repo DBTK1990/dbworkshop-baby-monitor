@@ -365,7 +365,8 @@ class StreamingService : LifecycleService() {
                     }
                 },
                 onClientDisconnected = {
-                    if (streamingServerHelper?.hasAnyStreamingClients() != true &&
+                    val hasAnyStreamingClients = streamingServerHelper?.hasAnyStreamingClients() ?: false
+                    if (!hasAnyStreamingClients &&
                         webRtcManager?.hasPeers() != true) {
                         launchMain {
                             stopCamera()

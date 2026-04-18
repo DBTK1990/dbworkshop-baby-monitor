@@ -104,6 +104,8 @@ class StreamingServerHelper(
     private val RTP_PAYLOAD_TYPE_JPEG = 26
     private val RTP_CLOCK_RATE = 90000
     private val RTP_MAX_PACKET_SIZE = 1400
+    private val DEFAULT_JPEG_WIDTH = 640
+    private val DEFAULT_JPEG_HEIGHT = 480
 
     fun getClients(): List<Client> = clients.toList()
     fun hasAnyStreamingClients(): Boolean = clients.isNotEmpty() || rtspClients.values.any { it.isPlaying }
@@ -717,7 +719,7 @@ a=control:$normalizedUri
         val widthBlocks = (dimensions.first / 8).coerceIn(0, 255)
         val heightBlocks = (dimensions.second / 8).coerceIn(0, 255)
         val timestamp = currentRtpTimestamp()
-        val maxPayload = RTP_MAX_PACKET_SIZE - 20 // 12-byte RTP header + 8-byte JPEG payload header
+        val maxPayload = RTP_MAX_PACKET_SIZE - 20 // RTP packet budget minus fixed 20-byte RTP+JPEG headers
         val clientsToRemove = mutableListOf<String>()
 
         playingClients.forEach { client ->
@@ -786,7 +788,7 @@ a=control:$normalizedUri
         packet[13] = ((offset shr 16) and 0xFF).toByte()
         packet[14] = ((offset shr 8) and 0xFF).toByte()
         packet[15] = (offset and 0xFF).toByte()
-        packet[16] = 0x01
+        packet[16] = 0x01 // JPEG type for baseline DCT
         packet[17] = 0xFF.toByte()
         packet[18] = widthBlocks.toByte()
         packet[19] = heightBlocks.toByte()
@@ -811,13 +813,13 @@ a=control:$normalizedUri
             inJustDecodeBounds = true
         }
         BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size, options)
-        val width = if (options.outWidth > 0) options.outWidth else 640
-        val height = if (options.outHeight > 0) options.outHeight else 480
+        val width = if (options.outWidth > 0) options.outWidth else DEFAULT_JPEG_WIDTH
+        val height = if (options.outHeight > 0) options.outHeight else DEFAULT_JPEG_HEIGHT
         return width to height
     }
 
     private fun currentRtpTimestamp(): Int {
-        return ((System.nanoTime() / 1_000_000L) * RTP_CLOCK_RATE / 1000L).toInt()
+        return (System.nanoTime() * RTP_CLOCK_RATE / 1_000_000_000L).toInt()
     }
 
     private suspend fun handleClientConnection(socket: Socket, clientIp: String) {
