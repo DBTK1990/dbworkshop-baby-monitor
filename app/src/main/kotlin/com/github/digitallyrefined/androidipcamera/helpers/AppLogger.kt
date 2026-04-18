@@ -8,6 +8,7 @@ import java.util.Date
 import java.util.LinkedList
 import java.util.Locale
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.TimeZone
 
 enum class LogLevel(val label: String, val color: Int) {
     VERBOSE("VERBOSE", Color.parseColor("#B0B0B0")),
@@ -33,13 +34,20 @@ data class LogEntry(
  */
 object AppLogger {
 
-    private const val MAX_ENTRIES = 1_000
+    const val MAX_ENTRIES = 1_000
 
     // LinkedList stored directly so we can use removeFirst() for O(1) removal at head.
     private val rawEntries: LinkedList<LogEntry> = LinkedList()
     private val entries: MutableList<LogEntry> = Collections.synchronizedList(rawEntries)
 
     private val listeners = CopyOnWriteArrayList<(LogEntry) -> Unit>()
+
+    // One formatter per thread — avoids allocating a new SimpleDateFormat on every formatCLF() call.
+    private val clfFormatter: ThreadLocal<SimpleDateFormat> = ThreadLocal.withInitial {
+        SimpleDateFormat("dd/MMM/yyyy:HH:mm:ss Z", Locale.US).also { sdf ->
+            sdf.timeZone = TimeZone.getDefault()
+        }
+    }
 
     // ---------- public logging API ----------
 
@@ -48,6 +56,16 @@ object AppLogger {
     fun i(tag: String, message: String) = log(LogLevel.INFO,    tag, message)
     fun w(tag: String, message: String) = log(LogLevel.WARN,    tag, message)
     fun e(tag: String, message: String) = log(LogLevel.ERROR,   tag, message)
+
+    /** Overloads that accept a [Throwable] — forwards the full exception to logcat. */
+    fun w(tag: String, message: String, throwable: Throwable) {
+        Log.w(tag, message, throwable)
+        log(LogLevel.WARN, tag, "$message: ${throwable.javaClass.simpleName}: ${throwable.message}")
+    }
+    fun e(tag: String, message: String, throwable: Throwable) {
+        Log.e(tag, message, throwable)
+        log(LogLevel.ERROR, tag, "$message: ${throwable.javaClass.simpleName}: ${throwable.message}")
+    }
 
     fun log(level: LogLevel, tag: String, message: String, host: String = "127.0.0.1") {
         val entry = LogEntry(Date(), level, tag, message, host)
@@ -81,7 +99,7 @@ object AppLogger {
      *   host ident authuser [dd/MMM/yyyy:HH:mm:ss Z] "LEVEL TAG: message" - -
      */
     fun formatCLF(entry: LogEntry): String {
-        val timestamp = SimpleDateFormat("dd/MMM/yyyy:HH:mm:ss Z", Locale.US).format(entry.timestamp)
+        val timestamp = clfFormatter.get()!!.format(entry.timestamp)
         val escaped   = entry.message.replace("\"", "\\\"")
         return "${entry.host} - - [$timestamp] \"${entry.level.label} ${entry.tag}: $escaped\" - -"
     }

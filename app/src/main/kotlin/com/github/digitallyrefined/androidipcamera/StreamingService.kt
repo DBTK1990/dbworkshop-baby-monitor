@@ -388,7 +388,7 @@ class StreamingService : LifecycleService() {
         }
         streamingServerHelper?.startStreamingServer()
         Log.i(TAG, "Requested HTTPS server start on port $STREAM_PORT")
-        AppLogger.i(TAG, "HTTPS server started on port $STREAM_PORT")
+        AppLogger.i(TAG, "Requested HTTPS server start on port $STREAM_PORT")
         val localIpAddress = getLocalIpAddress()
         if (isValidIpv4Address(localIpAddress)) {
             AppLogger.i(TAG, "Local IP: $localIpAddress — triggering camera registration")

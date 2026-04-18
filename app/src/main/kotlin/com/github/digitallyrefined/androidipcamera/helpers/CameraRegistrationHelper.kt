@@ -73,7 +73,7 @@ object CameraRegistrationHelper {
                     AppLogger.w(TAG, "Registration HTTP $code for IP $ip")
                 }
             } catch (e: Exception) {
-                AppLogger.e(TAG, "Registration failed for IP $ip: ${e.javaClass.simpleName}: ${e.message}")
+                AppLogger.e(TAG, "Registration failed for IP $ip", e)
             } finally {
                 conn?.disconnect()
             }

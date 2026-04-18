@@ -212,9 +212,7 @@ class MainActivity : AppCompatActivity() {
                 )
                 currentRegex  = compiled
                 logAdapter.setEntries(AppLogger.getEntries(), compiled)
-                if (logAdapter.itemCount > 0) {
-                    logRecyclerView.scrollToPosition(logAdapter.itemCount - 1)
-                }
+                // setEntries() already scrolls to the last item — no second scroll needed.
             }
         })
 
@@ -426,6 +424,11 @@ class MainActivity : AppCompatActivity() {
         fun addEntry(entry: LogEntry, regex: Regex?) {
             if (regex != null && !matches(entry, regex)) return
             displayedEntries.add(entry)
+            // Mirror AppLogger's own cap so the adapter never grows unbounded.
+            if (displayedEntries.size > AppLogger.MAX_ENTRIES) {
+                displayedEntries.removeAt(0)
+                notifyItemRemoved(0)
+            }
             notifyItemInserted(displayedEntries.size - 1)
             logRecyclerView.scrollToPosition(displayedEntries.size - 1)
         }
