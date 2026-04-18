@@ -36,6 +36,7 @@ import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import androidx.preference.PreferenceManager
 import com.github.digitallyrefined.androidipcamera.helpers.*
+import com.github.digitallyrefined.androidipcamera.helpers.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -130,6 +131,7 @@ class StreamingService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
+        AppLogger.i(TAG, "Service created")
         cameraExecutor = Executors.newSingleThreadExecutor()
         startForegroundService()
 
@@ -171,6 +173,7 @@ class StreamingService : LifecycleService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        AppLogger.i(TAG, "Service destroyed")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             try {
                 unregisterReceiver(notificationChannelReceiver)
@@ -303,6 +306,7 @@ class StreamingService : LifecycleService() {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error starting server: ${e.message}")
+            AppLogger.e(TAG, "Error starting server: ${e.message}")
         }
     }
 
@@ -356,10 +360,12 @@ class StreamingService : LifecycleService() {
                 this,
                 onLog = { message ->
                     Log.i(TAG, "StreamingServer: $message")
+                    AppLogger.i(TAG, message)
                     onLog?.invoke(message)
                 },
                 onClientConnected = {
                     launchMain {
+                        AppLogger.i(TAG, "Client connected")
                         onClientConnected?.invoke()
                         startCameraIfNeeded()
                     }
@@ -369,6 +375,7 @@ class StreamingService : LifecycleService() {
                     if (!hasAnyStreamingClients &&
                         webRtcManager?.hasPeers() != true) {
                         launchMain {
+                            AppLogger.i(TAG, "All clients disconnected")
                             stopCamera()
                             onClientDisconnected?.invoke()
                         }
@@ -381,11 +388,14 @@ class StreamingService : LifecycleService() {
         }
         streamingServerHelper?.startStreamingServer()
         Log.i(TAG, "Requested HTTPS server start on port $STREAM_PORT")
+        AppLogger.i(TAG, "Requested HTTPS server start on port $STREAM_PORT")
         val localIpAddress = getLocalIpAddress()
         if (isValidIpv4Address(localIpAddress)) {
+            AppLogger.i(TAG, "Local IP: $localIpAddress — triggering camera registration")
             CameraRegistrationHelper.register(this, localIpAddress)
         } else {
             Log.w(TAG, "Skipping camera registration due to invalid local IPv4: $localIpAddress")
+            AppLogger.w(TAG, "Skipping camera registration, invalid local IP: $localIpAddress")
         }
     }
 
@@ -502,6 +512,7 @@ class StreamingService : LifecycleService() {
 
             } catch (exc: Exception) {
                 Log.e(TAG, "Use case binding failed", exc)
+                AppLogger.e(TAG, "Camera use-case binding failed: ${exc.message}")
             }
         }, ContextCompat.getMainExecutor(this))
     }
