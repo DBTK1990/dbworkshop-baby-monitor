@@ -410,6 +410,8 @@
       }
 
       function scheduleReconnect() {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
         setStreamMode('error');
         reconnectTimer = setTimeout(startWebRTC, 3000);
       }

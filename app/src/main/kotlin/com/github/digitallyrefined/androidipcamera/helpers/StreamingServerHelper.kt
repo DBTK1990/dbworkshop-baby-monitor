@@ -966,7 +966,7 @@ a=control:$normalizedUri
                 val curScale = prefs.getString("stream_scale", "1.0") ?: "1.0"
                 val curExposure = prefs.getString("camera_exposure", "0") ?: "0"
                 val curContrast = prefs.getString("camera_contrast", "0") ?: "0"
-                val curDelay = prefs.getString("stream_delay", "33") ?: "33"
+                val curDelay = prefs.getString("stream_delay", "0") ?: "0"
                 val curTorch = prefs.getString("camera_torch", "off") ?: "off"
 
                 val htmlTemplate = try {

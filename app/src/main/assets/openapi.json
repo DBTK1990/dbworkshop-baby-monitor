@@ -257,12 +257,24 @@
                   }
                 }
               }
+            },
+            "application/sdp": {
+              "schema": {
+                "type": "string",
+                "description": "Raw SDP offer body (used by go2rtc and other WebRTC clients that send SDP directly)"
+              }
+            },
+            "text/plain": {
+              "schema": {
+                "type": "string",
+                "description": "Raw SDP offer body"
+              }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "SDP answer with bundled ICE candidates. Set this as the remote description on the browser RTCPeerConnection.",
+            "description": "SDP answer with bundled ICE candidates. Response format mirrors the request: JSON requests receive a JSON body; raw SDP requests receive a plain-text SDP answer. Set this as the remote description on the browser RTCPeerConnection.",
             "content": {
               "application/json": {
                 "schema": {
@@ -282,11 +294,17 @@
                     }
                   }
                 }
+              },
+              "application/sdp": {
+                "schema": {
+                  "type": "string",
+                  "description": "Raw SDP answer (returned when the request Content-Type was application/sdp or text/plain)"
+                }
               }
             }
           },
           "400": {
-            "description": "Invalid JSON body or missing sdp field."
+            "description": "Invalid request body or missing SDP field."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
