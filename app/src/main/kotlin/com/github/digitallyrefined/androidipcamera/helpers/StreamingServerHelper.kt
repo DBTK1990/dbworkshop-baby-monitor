@@ -104,8 +104,14 @@ class StreamingServerHelper(
     private val RTP_PAYLOAD_TYPE_JPEG = 26
     private val RTP_CLOCK_RATE = 90000
     private val RTP_MAX_PACKET_SIZE = 1400
+    private val RTP_FIXED_HEADER_SIZE = 12
+    private val RTP_JPEG_HEADER_SIZE = 8
+    private val RTP_JPEG_OVERHEAD = RTP_FIXED_HEADER_SIZE + RTP_JPEG_HEADER_SIZE
     private val DEFAULT_JPEG_WIDTH = 640
     private val DEFAULT_JPEG_HEIGHT = 480
+    private val JPEG_TYPE_BASELINE_DCT = 0x01
+    private val JPEG_QUALITY_FACTOR = 75
+    private val RTSP_SESSION_TIMEOUT_SECONDS = 60
     private val random = SecureRandom()
 
     fun getClients(): List<Client> = clients.toList()
@@ -513,7 +519,7 @@ class StreamingServerHelper(
                             cSeq = cSeq,
                             headers = mapOf(
                                 "Transport" to "RTP/AVP/TCP;unicast;interleaved=$rtpChannel-$rtcpChannel;ssrc=${client.ssrc.toUInt().toString(16)}",
-                                "Session" to "$currentSessionId;timeout=60"
+                                "Session" to "$currentSessionId;timeout=$RTSP_SESSION_TIMEOUT_SECONDS"
                             )
                         )
                     }
@@ -723,7 +729,7 @@ a=control:$normalizedUri
         val widthBlocks = (dimensions.first / 8).coerceIn(0, 255)
         val heightBlocks = (dimensions.second / 8).coerceIn(0, 255)
         val timestamp = currentRtpTimestamp()
-        val maxPayload = RTP_MAX_PACKET_SIZE - 20 // 12-byte RTP header + 8-byte JPEG payload header
+        val maxPayload = RTP_MAX_PACKET_SIZE - RTP_JPEG_OVERHEAD
         val clientsToRemove = mutableListOf<String>()
 
         playingClients.forEach { client ->
@@ -775,7 +781,7 @@ a=control:$normalizedUri
         widthBlocks: Int,
         heightBlocks: Int
     ): ByteArray {
-        val packet = ByteArray(12 + 8 + length)
+        val packet = ByteArray(RTP_JPEG_OVERHEAD + length)
         packet[0] = 0x80.toByte()
         packet[1] = (((if (marker) 0x80 else 0x00) or RTP_PAYLOAD_TYPE_JPEG)).toByte()
         packet[2] = ((sequenceNumber shr 8) and 0xFF).toByte()
@@ -792,8 +798,8 @@ a=control:$normalizedUri
         packet[13] = ((offset shr 16) and 0xFF).toByte()
         packet[14] = ((offset shr 8) and 0xFF).toByte()
         packet[15] = (offset and 0xFF).toByte()
-        packet[16] = 0x01 // JPEG type for baseline DCT
-        packet[17] = 75.toByte()
+        packet[16] = JPEG_TYPE_BASELINE_DCT.toByte() // JPEG type for baseline DCT
+        packet[17] = JPEG_QUALITY_FACTOR.toByte()
         packet[18] = widthBlocks.toByte()
         packet[19] = heightBlocks.toByte()
         System.arraycopy(jpegBytes, offset, packet, 20, length)
