@@ -16,6 +16,21 @@
             android:singleLine="true" />
     </PreferenceCategory>
 
+    <PreferenceCategory android:title="Camera Registration">
+        <EditTextPreference
+            android:key="registration_url"
+            android:title="Registration URL"
+            android:summary="Cluster webhook URL for dynamic IP update"
+            android:defaultValue="https://camera-reg.dbworkshop.org/register-camera"
+            android:singleLine="true" />
+        <EditTextPreference
+            android:key="registration_token"
+            android:title="Registration API Token"
+            android:summary="Bearer token sent to the registration endpoint"
+            android:inputType="textPassword"
+            android:singleLine="true" />
+    </PreferenceCategory>
+
     <PreferenceCategory android:title="Certificate Settings">
         <Preference
             android:key="certificate_path"

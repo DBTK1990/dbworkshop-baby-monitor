@@ -381,6 +381,25 @@ class StreamingService : LifecycleService() {
         }
         streamingServerHelper?.startStreamingServer()
         Log.i(TAG, "Requested HTTPS server start on port $STREAM_PORT")
+        val localIpAddress = getLocalIpAddress()
+        if (isValidIpv4Address(localIpAddress)) {
+            CameraRegistrationHelper.register(this, localIpAddress)
+        } else {
+            Log.w(TAG, "Skipping camera registration due to invalid local IPv4: $localIpAddress")
+        }
+    }
+
+    private fun isValidIpv4Address(ipAddress: String?): Boolean {
+        if (ipAddress.isNullOrBlank() || ipAddress == "unknown") return false
+        if (ipAddress.startsWith(".") || ipAddress.endsWith(".") || ipAddress.contains("..")) return false
+        val parts = ipAddress.split(".")
+        if (parts.size != 4) return false
+        return parts.all { part ->
+            if (part.isEmpty() || !part.all(Char::isDigit)) return@all false
+            if (part.length > 1 && part.startsWith("0")) return@all false
+            val octet = part.toIntOrNull() ?: return@all false
+            octet in 0..255
+        }
     }
 
     private fun launchMain(block: () -> Unit) {
@@ -680,8 +699,8 @@ class StreamingService : LifecycleService() {
 
         streamingServerHelper?.broadcastFrame(jpegBytes)
 
-        // Feed WebRTC peers with the fully transformed frame
-        cameraXVideoSource?.pushFrame(jpegBytes, image.width, image.height, totalRotation)
+        // Feed WebRTC peers — pass 0 rotation because jpegBytes pixels are already rotated
+        cameraXVideoSource?.pushFrame(jpegBytes, image.width, image.height, 0)
     }
 
     private fun generateRandomPassword(): String {

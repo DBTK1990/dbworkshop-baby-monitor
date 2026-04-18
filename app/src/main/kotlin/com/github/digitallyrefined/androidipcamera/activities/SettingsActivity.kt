@@ -194,6 +194,36 @@ class SettingsActivity : AppCompatActivity() {
                 }
             }
 
+            // Save registration token to SecureStorage (never persist plaintext)
+            findPreference<EditTextPreference>("registration_token")?.apply {
+                setOnBindEditTextListener { editText ->
+                    editText.text = null
+                    editText.hint = "Enter registration token"
+                }
+                setOnPreferenceChangeListener { _, newValue ->
+                    val token = newValue.toString()
+                    val prefsEditor = preferenceManager.sharedPreferences?.edit()
+                    if (token.isBlank()) {
+                        secureStorage.removeSecureString(SecureStorage.KEY_REGISTRATION_TOKEN)
+                        prefsEditor?.remove("registration_token")?.apply()
+                        Toast.makeText(requireContext(), "Registration token cleared", Toast.LENGTH_SHORT).show()
+                        return@setOnPreferenceChangeListener false
+                    }
+                    if (token.any(Char::isWhitespace)) {
+                        Toast.makeText(requireContext(), "Registration token cannot contain whitespace", Toast.LENGTH_SHORT).show()
+                        return@setOnPreferenceChangeListener false
+                    }
+                    secureStorage.putSecureString(SecureStorage.KEY_REGISTRATION_TOKEN, token)
+                    prefsEditor?.remove("registration_token")?.apply()
+                    Toast.makeText(
+                        requireContext(),
+                        "Registration token saved securely",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    false
+                }
+            }
+
             // Add listener for camera resolution changes
             findPreference<Preference>("camera_resolution")?.apply {
                 setOnPreferenceChangeListener { preference, newValue ->
