@@ -3,7 +3,7 @@
 [![downloads](https://img.shields.io/github/downloads/DigitallyRefined/android-ip-camera/total.svg)](https://github.com/DigitallyRefined/android-ip-camera/releases)
 [![downloads](https://img.shields.io/github/downloads/DigitallyRefined/android-ip-camera/latest/total.svg)](https://github.com/DigitallyRefined/android-ip-camera/releases)
 
-An Android IP Camera app — WebRTC for ultra-low-latency video in the browser, RTSP for video app clients.
+An Android MJPEG IP Camera app
 
 ![Desktop Browser](screenshot.webp)
 
@@ -21,13 +21,12 @@ alt="Get it on Obtainium" align="center" height="54" /></a>
 
 ## Features
 
-- 🌎 Built in web server — open `https://<ip_address>:4444` in a browser for a WebRTC live view with camera controls
+- 🌎 Built in server, just open the video stream in a web browser, video app or even set it as a Home Assistant MJPEG IP Camera (using `https://<ip_address>:4444/stream`)
 - 📡 RTSP endpoint with RTP-over-TCP transport for clients that require `rtsp://` (using `rtsp://<username>:<password>@<ip_address>:8554/stream`)
-- 🔗 go2rtc compatible — use `webrtc:https://user:pass@<ip>:4444/webrtc/offer` as a source; camera controls available via `https://<ip>:4444/?zoom=2&torch=on` etc.
 - 📴 Option to turn the display off while streaming
 - 🤳 Switch between the main or selfie camera
-- 🎛️ Remote web interface with controls for camera selection, image rotation, flash light toggle, resolution, zoom, exposure and contrast
-- 🖼️ Choose between different image quality settings
+- 🎛️ Remote web interface with controls for camera section, image rotation, audio/video sync, flash light toggle, resolution, zoom, exposure and contrast
+- 🖼️ Choose between different image quality settings and frame rates (to help reduce phone over heating)
 - 🛂 Username and password protection
 - 🔐 Automatic TLS certificate support to protect stream and login details via HTTPS
 
