@@ -279,7 +279,7 @@ class StreamingService : LifecycleService() {
             )
             .apply()
         cameraResolutionHelper = null
-        if (streamingServerHelper?.hasAnyClients() == true) {
+        if (streamingServerHelper?.getClients()?.isNotEmpty() == true) {
             startCamera()
         }
     }
@@ -346,7 +346,7 @@ class StreamingService : LifecycleService() {
                     launchMain {
                         if (count > 0) {
                             startCameraIfNeeded()
-                        } else if (streamingServerHelper?.hasAnyClients() != true) {
+                        } else if (streamingServerHelper?.getClients()?.isEmpty() == true) {
                             stopCamera()
                             onClientDisconnected?.invoke()
                         }
@@ -609,7 +609,7 @@ class StreamingService : LifecycleService() {
             }
             "delay" -> {
                 val delay = value.toLongOrNull() ?: return
-                if (delay in 0L..1000L) prefs.edit().putString("stream_delay", value).apply()
+                if (delay in 10L..1000L) prefs.edit().putString("stream_delay", value).apply()
             }
             "rotate" -> {
                 val currentRotation = prefs.getInt("camera_manual_rotate", 0)
@@ -621,7 +621,7 @@ class StreamingService : LifecycleService() {
 
     private fun processImage(image: ImageProxy) {
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
-        val delay = prefs.getString("stream_delay", "0")?.toLongOrNull() ?: 0L
+        val delay = prefs.getString("stream_delay", "33")?.toLongOrNull() ?: 33L
         val currentTime = System.currentTimeMillis()
         if (currentTime - lastFrameTime < delay) {
             image.close()

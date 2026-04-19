@@ -82,8 +82,7 @@ class MainActivity : AppCompatActivity() {
                 streamingService?.setPreviewSurface(viewBinding.viewFinder.surfaceProvider)
             }
 
-            // Check current status
-            val hasClients = streamingService?.streamingServerHelper?.hasAnyClients() == true
+            val hasClients = streamingService?.streamingServerHelper?.getClients()?.isNotEmpty() == true
             showNoClientMessage(!hasClients)
         }
 
@@ -342,18 +341,15 @@ class MainActivity : AppCompatActivity() {
             }
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
-            ipAddressText.visibility = View.VISIBLE
-            settingsButton.visibility = View.VISIBLE
-            hidePreviewButton.visibility = View.VISIBLE
-            exitButton.visibility = View.VISIBLE
-
-            val hasClients = streamingService?.streamingServerHelper?.hasAnyClients() == true
-
-            viewFinder.visibility = if (hasClients) View.VISIBLE else View.INVISIBLE
-            noClientMessage.visibility = if (hasClients) View.GONE else View.VISIBLE
-            rootView.setBackgroundColor(if (hasClients) android.graphics.Color.TRANSPARENT else android.graphics.Color.BLACK)
-
+            ipAddressText.visibility    = View.VISIBLE
+            settingsButton.visibility   = View.VISIBLE
+            hidePreviewButton.visibility= View.VISIBLE
+            exitButton.visibility       = View.VISIBLE
+            val hasClients = streamingService?.streamingServerHelper?.getClients()?.isNotEmpty() == true
+            viewFinder.visibility      = if (hasClients) View.VISIBLE else View.INVISIBLE
+            noClientMessage.visibility = if (hasClients) View.GONE   else View.VISIBLE
+            rootView.setBackgroundColor(
+                if (hasClients) android.graphics.Color.TRANSPARENT else android.graphics.Color.BLACK)
             userHiddenPreview = false
             backGestureCallback.isEnabled = false
             if (isBound && hasClients) {

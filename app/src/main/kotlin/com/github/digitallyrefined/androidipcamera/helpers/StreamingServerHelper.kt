@@ -38,6 +38,7 @@ import java.nio.ByteOrder
 import java.security.KeyStore
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLServerSocket
@@ -46,11 +47,21 @@ class StreamingServerHelper(
     private val context: Context,
     private val streamPort: Int = 4444,
     private val rtspPort: Int = 8554,
+    private val maxClients: Int = 3,
+    private val maxAuthenticatedClients: Int = 10, // Higher limit for authenticated users
     private val onLog: (String) -> Unit = {},
     private val onClientConnected: () -> Unit = {},
     private val onClientDisconnected: () -> Unit = {},
     private val onControlCommand: (String, String) -> Unit = { _, _ -> }
 ) {
+    data class Client(
+        val socket: Socket,
+        val outputStream: OutputStream,
+        val writer: PrintWriter,
+        val connectedAt: Long = System.currentTimeMillis(),
+        val isAuthenticated: Boolean = false
+    )
+
     private data class FailedAttempt(
         var count: Int = 0,
         var lastAttempt: Long = 0L,
@@ -74,6 +85,7 @@ class StreamingServerHelper(
     private var rtspServerJob: Job? = null
     @Volatile
     private var isStarting = false
+    private val clients = CopyOnWriteArrayList<Client>()
     private val rtspClients = ConcurrentHashMap<String, RtspClient>()
     private val failedAttempts = ConcurrentHashMap<String, FailedAttempt>()
     @Volatile
@@ -87,6 +99,9 @@ class StreamingServerHelper(
     private val MAX_HTTP_HEADER_LINE_LENGTH = 8192
 
     // Connection limits
+    private val MAX_CONNECTION_DURATION_MS = 30 * 60 * 1000L // 30 minutes max per connection (unauthenticated)
+    private val MAX_AUTHENTICATED_CONNECTION_DURATION_MS = 24 * 60 * 60 * 1000L // 24 hours for authenticated users
+    private val CONNECTION_READ_TIMEOUT_MS = 30 * 1000 // 30 seconds read timeout
     private val SOCKET_TIMEOUT_MS = 60 * 1000 // 60 seconds socket timeout
     private val RTP_PAYLOAD_TYPE_JPEG = 26
     private val RTP_CLOCK_RATE = 90000
@@ -102,8 +117,8 @@ class StreamingServerHelper(
     private val RTSP_SERVER_VERSION = "AndroidIPCamera/1.0"
     private val random = SecureRandom()
 
-    fun hasAnyStreamingClients(): Boolean = rtspClients.values.any { it.isPlaying }
-    fun hasAnyClients(): Boolean = hasAnyStreamingClients() || webRtcManager?.hasPeers() == true
+    fun getClients(): List<Client> = clients.toList()
+    fun hasAnyStreamingClients(): Boolean = clients.isNotEmpty() || rtspClients.values.any { it.isPlaying }
 
     private fun isRateLimited(clientIp: String): Boolean {
         val now = System.currentTimeMillis()
@@ -587,6 +602,26 @@ class StreamingServerHelper(
     }
 
     fun broadcastFrame(jpegBytes: ByteArray) {
+        clients.let { clientsList ->
+            val toRemove = mutableListOf<Client>()
+            clientsList.forEach { client ->
+                try {
+                    client.writer.print("--frame\r\n")
+                    client.writer.print("Content-Type: image/jpeg\r\n")
+                    client.writer.print("Content-Length: ${jpegBytes.size}\r\n\r\n")
+                    client.writer.flush()
+                    client.outputStream.write(jpegBytes)
+                    client.outputStream.flush()
+                } catch (e: IOException) {
+                    try {
+                        client.socket.close()
+                    } catch (_: Exception) {
+                    }
+                    toRemove.add(client)
+                }
+            }
+            toRemove.forEach { removeClient(it) }
+        }
         sendRtspJpegFrame(jpegBytes)
     }
 
@@ -966,7 +1001,7 @@ a=control:$normalizedUri
                 val curScale = prefs.getString("stream_scale", "1.0") ?: "1.0"
                 val curExposure = prefs.getString("camera_exposure", "0") ?: "0"
                 val curContrast = prefs.getString("camera_contrast", "0") ?: "0"
-                val curDelay = prefs.getString("stream_delay", "0") ?: "0"
+                val curDelay = prefs.getString("stream_delay", "33") ?: "33"
                 val curTorch = prefs.getString("camera_torch", "off") ?: "off"
 
                 val htmlTemplate = try {
@@ -1079,23 +1114,13 @@ a=control:$normalizedUri
                 }
                 val body = String(bodyBytes, 0, totalRead, Charsets.UTF_8)
 
-                val contentType = headers
-                    .find { it.startsWith("Content-Type:", ignoreCase = true) }
-                    ?.substringAfter(":")?.trim() ?: ""
-                val useJsonResponse = contentType.startsWith("application/json", ignoreCase = true)
-
-                val offerSdp = if (useJsonResponse) {
-                    try {
-                        org.json.JSONObject(body).getString("sdp")
-                    } catch (e: Exception) {
-                        writer.print("HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nInvalid JSON")
-                        writer.flush()
-                        socket.close()
-                        return
-                    }
-                } else {
-                    // Raw SDP body (application/sdp, text/plain, or go2rtc format)
-                    body.trim()
+                val offerSdp = try {
+                    org.json.JSONObject(body).getString("sdp")
+                } catch (e: Exception) {
+                    writer.print("HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nInvalid JSON")
+                    writer.flush()
+                    socket.close()
+                    return
                 }
 
                 val sessionId = java.util.UUID.randomUUID().toString()
@@ -1110,20 +1135,15 @@ a=control:$normalizedUri
                     return
                 }
 
-                val responseBytes = if (useJsonResponse) {
-                    org.json.JSONObject()
-                        .put("sdp", answerSdp)
-                        .put("type", "answer")
-                        .put("sessionId", sessionId)
-                        .toString()
-                        .toByteArray(Charsets.UTF_8)
-                } else {
-                    answerSdp.toByteArray(Charsets.UTF_8)
-                }
-                val responseContentType = if (useJsonResponse) "application/json" else "application/sdp"
+                val responseBytes = org.json.JSONObject()
+                    .put("sdp", answerSdp)
+                    .put("type", "answer")
+                    .put("sessionId", sessionId)
+                    .toString()
+                    .toByteArray(Charsets.UTF_8)
 
                 writer.print("HTTP/1.1 200 OK\r\n")
-                writer.print("Content-Type: $responseContentType\r\n")
+                writer.print("Content-Type: application/json\r\n")
                 writer.print("Content-Length: ${responseBytes.size}\r\n")
                 writer.print("Connection: close\r\n\r\n")
                 writer.flush()
@@ -1223,14 +1243,56 @@ a=control:$normalizedUri
                 return
             }
 
-            writer.print("HTTP/1.1 404 Not Found\r\n")
-            writer.print("Content-Type: text/plain\r\n")
-            writer.print("Connection: close\r\n\r\n")
-            writer.print("Not Found\r\n")
-            writer.flush()
-            try {
-                socket.close()
-            } catch (_: Exception) {
+            if (uri.startsWith("/stream")) {
+                // AUTHENTICATED CONNECTION - No rate limiting, higher connection limits
+                if (handleMaxClients(socket, isAuthenticated = true)) return
+
+                // Send HTTP response headers for MJPEG stream
+                // Use HTTP/1.1 with keep-alive for better streaming performance
+                writer.print("HTTP/1.1 200 OK\r\n")
+                writer.print("Connection: keep-alive\r\n")
+                writer.print("Cache-Control: no-cache, no-store, must-revalidate\r\n")
+                writer.print("Pragma: no-cache\r\n")
+                writer.print("Expires: 0\r\n")
+                writer.print("Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n")
+                writer.flush()
+
+                // Add client to list - frames will be sent from MainActivity.processImage()
+                clients.add(Client(socket, outputStream, writer, System.currentTimeMillis(), isAuthenticated = true))
+                onClientConnected()
+
+                // Keep connection alive - frames will be sent from MainActivity.processImage()
+                // Wait for connection to close or be removed
+                try {
+                    while (socket.isConnected &&
+                        !socket.isClosed &&
+                        clients.any { it.socket == socket }) {
+                        Thread.sleep(1000)
+                    }
+                } catch (e: IOException) {
+                    // Client disconnected
+                } finally {
+                    // Remove client when connection closes
+                    clients.removeIf { it.socket == socket }
+                    try {
+                        socket.close()
+                    } catch (e: Exception) {
+                        // Ignore
+                    }
+                    if (!hasAnyStreamingClients()) {
+                        onClientDisconnected()
+                    }
+                }
+            } else {
+                writer.print("HTTP/1.1 404 Not Found\r\n")
+                writer.print("Content-Type: text/plain\r\n")
+                writer.print("Connection: close\r\n\r\n")
+                writer.print("Not Found\r\n")
+                writer.flush()
+                try {
+                    socket.close()
+                } catch (_: Exception) {
+                }
             }
         } catch (e: Exception) {
             onLog("Error handling client connection from $clientIp: ${e.message}")
@@ -1290,6 +1352,23 @@ a=control:$normalizedUri
         outputStream.write(data, 0, length)
         outputStream.write("\r\n".toByteArray())
         outputStream.flush()
+    }
+
+    fun handleMaxClients(socket: Socket, isAuthenticated: Boolean = false): Boolean {
+        val maxAllowed = if (isAuthenticated) maxAuthenticatedClients else maxClients
+        if (clients.size >= maxAllowed) {
+            socket.getOutputStream().writer().use { writer ->
+                writer.write("HTTP/1.1 503 Service Unavailable\r\n")
+                writer.write("Retry-After: 30\r\n") // 30 seconds
+                writer.write("Connection: close\r\n\r\n")
+                writer.flush()
+            }
+            socket.close()
+            // Add small delay to prevent rapid reconnection loops
+            Thread.sleep(100)
+            return true
+        }
+        return false
     }
 
     fun setAppInForeground(foreground: Boolean) {
@@ -1358,6 +1437,13 @@ a=control:$normalizedUri
     }
 
     fun closeClientConnection() {
+        clients.forEach { client ->
+            try {
+                client.socket.close()
+            } catch (e: IOException) {
+                onLog("Error closing client connection: ${e.message}")
+            }
+        }
         rtspClients.values.forEach { client ->
             try {
                 client.socket.close()
@@ -1365,9 +1451,36 @@ a=control:$normalizedUri
                 onLog("Error closing RTSP client connection: ${e.message}")
             }
         }
+        clients.clear()
         rtspClients.clear()
         if (!hasAnyStreamingClients()) {
             onClientDisconnected()
+        }
+    }
+
+    fun removeClient(client: Client) {
+        clients.remove(client)
+        try {
+            client.socket.close()
+        } catch (e: IOException) {
+            onLog("Error closing client socket: ${e.message}")
+        }
+        if (!hasAnyStreamingClients()) {
+            onClientDisconnected()
+        }
+    }
+
+    private fun cleanupExpiredConnections() {
+        val now = System.currentTimeMillis()
+        val toRemove = clients.filter { client ->
+            val maxDuration = if (client.isAuthenticated) MAX_AUTHENTICATED_CONNECTION_DURATION_MS else MAX_CONNECTION_DURATION_MS
+            now - client.connectedAt > maxDuration
+        }
+
+        toRemove.forEach { client ->
+            val authStatus = if (client.isAuthenticated) "authenticated" else "unauthenticated"
+            onLog("Removing expired $authStatus connection from ${client.socket.inetAddress.hostAddress}")
+            removeClient(client)
         }
     }
 }
