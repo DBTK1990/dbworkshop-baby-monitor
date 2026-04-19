@@ -179,8 +179,6 @@ class StreamingService : LifecycleService() {
         }
         cameraExecutor?.shutdown()
         stopCamera()
-        webRtcManager?.shutdown()
-        webRtcManager = null
         lifecycleScope.launch(Dispatchers.IO) {
             streamingServerHelper?.stopStreamingServer()
         }
@@ -448,8 +446,7 @@ class StreamingService : LifecycleService() {
                 .also { analysis ->
                     cameraExecutor?.let { executor ->
                         analysis.setAnalyzer(executor) { image ->
-                            if (streamingServerHelper?.hasAnyStreamingClients() == true ||
-                                webRtcManager?.hasPeers() == true) {
+                            if (streamingServerHelper?.hasAnyStreamingClients() == true) {
                                 processImage(image)
                             }
                             image.close()
