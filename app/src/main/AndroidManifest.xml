@@ -32,6 +32,10 @@
             android:name=".activities.SettingsActivity"
             android:label="Settings"
             android:parentActivityName=".activities.MainActivity" />
+        <activity
+            android:name=".activities.LogsActivity"
+            android:label="Logs"
+            android:parentActivityName=".activities.MainActivity" />
 
         <service
             android:name=".StreamingService"

@@ -116,7 +116,5 @@ dependencies {
     implementation 'org.bouncycastle:bcprov-jdk15on:1.70'
     implementation 'org.bouncycastle:bcpkix-jdk15on:1.70'
 
-    // WebRTC for low-latency audio+video streaming
-    implementation 'io.getstream:stream-webrtc-android:1.3.8'
 }
 

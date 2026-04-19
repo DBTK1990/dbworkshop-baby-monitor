@@ -40,7 +40,6 @@ import com.github.digitallyrefined.androidipcamera.helpers.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.Inet4Address
 import java.net.NetworkInterface
@@ -59,9 +58,6 @@ class StreamingService : LifecycleService() {
     private var lastFrameTime = 0L
     private var lensFacing = CameraSelector.DEFAULT_BACK_CAMERA
     private var cameraResolutionHelper: CameraResolutionHelper? = null
-    private var webRtcManager: WebRtcManager? = null
-    private var cameraXVideoSource: CameraXVideoSource? = null
-
     // UI Callbacks
     var onClientConnected: (() -> Unit)? = null
     var onClientDisconnected: (() -> Unit)? = null
@@ -333,29 +329,6 @@ class StreamingService : LifecycleService() {
 
     private suspend fun initServer() {
         if (streamingServerHelper == null) {
-            // Initialize WebRTC — PeerConnectionFactory requires the main thread
-            if (webRtcManager == null) {
-                val mgr = WebRtcManager(this) { msg ->
-                    Log.i(TAG, "WebRTC: $msg")
-                    onLog?.invoke(msg)
-                }
-                withContext(Dispatchers.Main) {
-                    mgr.initialize()
-                }
-                mgr.onPeerCountChanged = { count ->
-                    launchMain {
-                        if (count > 0) {
-                            startCameraIfNeeded()
-                        } else if (streamingServerHelper?.getClients()?.isEmpty() == true) {
-                            stopCamera()
-                            onClientDisconnected?.invoke()
-                        }
-                    }
-                }
-                webRtcManager = mgr
-                cameraXVideoSource = CameraXVideoSource(mgr)
-            }
-
             streamingServerHelper = StreamingServerHelper(
                 this,
                 onLog = { message ->
@@ -372,8 +345,7 @@ class StreamingService : LifecycleService() {
                 },
                 onClientDisconnected = {
                     val hasAnyStreamingClients = streamingServerHelper?.hasAnyStreamingClients() ?: false
-                    if (!hasAnyStreamingClients &&
-                        webRtcManager?.hasPeers() != true) {
+                    if (!hasAnyStreamingClients) {
                         launchMain {
                             AppLogger.i(TAG, "All clients disconnected")
                             stopCamera()
@@ -382,9 +354,7 @@ class StreamingService : LifecycleService() {
                     }
                 },
                 onControlCommand = { key: String, value: String -> handleRemoteControl(key, value) }
-            ).also { helper ->
-                helper.webRtcManager = webRtcManager
-            }
+            )
         }
         streamingServerHelper?.startStreamingServer()
         Log.i(TAG, "Requested HTTPS server start on port $STREAM_PORT")
@@ -710,8 +680,6 @@ class StreamingService : LifecycleService() {
 
         streamingServerHelper?.broadcastFrame(jpegBytes)
 
-        // Feed WebRTC peers — pass 0 rotation because jpegBytes pixels are already rotated
-        cameraXVideoSource?.pushFrame(jpegBytes, image.width, image.height, 0)
     }
 
     private fun generateRandomPassword(): String {
