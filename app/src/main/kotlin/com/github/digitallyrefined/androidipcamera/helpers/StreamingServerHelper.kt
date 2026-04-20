@@ -70,7 +70,8 @@ class StreamingServerHelper(
 
     private data class RequestWindow(
         var count: Int = 0,
-        var windowStart: Long = 0L
+        var windowStart: Long = 0L,
+        var lastAccess: Long = 0L
     )
 
     private data class RtspClient(
@@ -105,6 +106,7 @@ class StreamingServerHelper(
     private val MIN_ENDPOINT_RATE_LIMIT_PER_MINUTE = 1
     private val MAX_ENDPOINT_RATE_LIMIT_PER_MINUTE = 1000
     private val ENDPOINT_RATE_LIMIT_WINDOW_MS = 60 * 1000L
+    private val MAX_TRACKED_ENDPOINT_WINDOWS = 5000
 
     // Connection limits
     private val MAX_CONNECTION_DURATION_MS = 30 * 60 * 1000L // 30 minutes max per connection (unauthenticated)
@@ -189,22 +191,35 @@ class StreamingServerHelper(
         val rateLimit = getConfiguredEndpointRateLimitPerMinute()
         val endpointPath = normalizeEndpointPath(uri)
         val windowKey = "$clientIp|$endpointPath"
-        val requestWindow = endpointRequestWindows.getOrPut(windowKey) {
-            RequestWindow(windowStart = now)
-        }
+        var isRateLimited = false
 
-        synchronized(requestWindow) {
+        endpointRequestWindows.compute(windowKey) { _, existingWindow ->
+            val requestWindow = existingWindow ?: RequestWindow(windowStart = now, lastAccess = now)
             if (now - requestWindow.windowStart >= ENDPOINT_RATE_LIMIT_WINDOW_MS) {
                 requestWindow.count = 0
                 requestWindow.windowStart = now
             }
+            requestWindow.lastAccess = now
 
             if (requestWindow.count >= rateLimit) {
-                return true
+                isRateLimited = true
+            } else {
+                requestWindow.count++
             }
+            requestWindow
+        }
 
-            requestWindow.count++
-            return false
+        cleanupStaleEndpointRateLimitWindows(now)
+        return isRateLimited
+    }
+
+    private fun cleanupStaleEndpointRateLimitWindows(now: Long) {
+        if (endpointRequestWindows.size <= MAX_TRACKED_ENDPOINT_WINDOWS) {
+            return
+        }
+        val cutoff = now - (ENDPOINT_RATE_LIMIT_WINDOW_MS * 2)
+        endpointRequestWindows.entries.removeIf { (_, requestWindow) ->
+            requestWindow.lastAccess < cutoff
         }
     }
 
