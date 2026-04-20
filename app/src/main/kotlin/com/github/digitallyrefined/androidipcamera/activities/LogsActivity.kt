@@ -4,6 +4,8 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.widget.Button
 import android.widget.ScrollView
 import android.widget.TextView
@@ -17,6 +19,14 @@ class LogsActivity : AppCompatActivity() {
     private lateinit var logsTextView: TextView
     private lateinit var logsScrollView: ScrollView
 
+    private val refreshHandler = Handler(Looper.getMainLooper())
+    private val refreshRunnable = object : Runnable {
+        override fun run() {
+            refreshLogs()
+            refreshHandler.postDelayed(this, 1000)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_logs)
@@ -25,8 +35,6 @@ class LogsActivity : AppCompatActivity() {
 
         logsTextView = findViewById(R.id.logsTextView)
         logsScrollView = findViewById(R.id.logsScrollView)
-
-        refreshLogs()
 
         findViewById<Button>(R.id.copyLogsButton).setOnClickListener {
             val text = LogBuffer.getAll().joinToString("\n")
@@ -43,7 +51,12 @@ class LogsActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        refreshLogs()
+        refreshHandler.post(refreshRunnable)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        refreshHandler.removeCallbacks(refreshRunnable)
     }
 
     private fun refreshLogs() {

@@ -7,10 +7,10 @@ import java.util.Locale
 object LogBuffer {
     private const val MAX_ENTRIES = 500
     private val entries = ArrayDeque<String>()
-    private val fmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+    private val fmt = ThreadLocal.withInitial { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
 
     fun add(message: String) {
-        val entry = "[${fmt.format(Date())}] $message"
+        val entry = "[${fmt.get()!!.format(Date())}] $message"
         synchronized(entries) {
             entries.addLast(entry)
             if (entries.size > MAX_ENTRIES) entries.removeFirst()
