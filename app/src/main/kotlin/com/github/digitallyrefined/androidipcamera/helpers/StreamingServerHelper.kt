@@ -588,7 +588,7 @@ class StreamingServerHelper(
         } finally {
             sessionId?.let {
                 val wasPlaying = rtspClients.remove(it)?.isPlaying == true
-                if (wasPlaying && !hasAnyStreamingClients() && webRtcManager?.hasPeers() != true) {
+                if (wasPlaying && !hasAnyStreamingClients()) {
                     onClientDisconnected()
                 }
             }
@@ -793,7 +793,7 @@ a=control:$normalizedUri
                 removed?.socket?.close()
             } catch (_: Exception) {
             }
-            if (removed?.isPlaying == true && !hasAnyStreamingClients() && webRtcManager?.hasPeers() != true) {
+            if (removed?.isPlaying == true && !hasAnyStreamingClients()) {
                 onClientDisconnected()
             }
         }
