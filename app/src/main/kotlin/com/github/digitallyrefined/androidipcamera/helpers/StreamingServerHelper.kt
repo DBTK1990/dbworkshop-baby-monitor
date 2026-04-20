@@ -96,6 +96,8 @@ class StreamingServerHelper(
     private val failedAttempts = ConcurrentHashMap<String, FailedAttempt>()
     private val endpointRequestWindows = ConcurrentHashMap<String, RequestWindow>()
     @Volatile
+    private var lastEndpointWindowCleanupMs: Long = 0L
+    @Volatile
     private var appInForeground: Boolean = true
     // SECURITY: Rate limiting constants (only for unauthenticated connections)
     private val MAX_FAILED_ATTEMPTS = 5  // 5 failed attempts allowed
@@ -203,6 +205,9 @@ class StreamingServerHelper(
 
             if (requestWindow.count >= rateLimit) {
                 isRateLimited = true
+                if (requestWindow.count < Int.MAX_VALUE) {
+                    requestWindow.count++
+                }
             } else {
                 requestWindow.count++
             }
@@ -217,6 +222,10 @@ class StreamingServerHelper(
         if (endpointRequestWindows.size <= MAX_TRACKED_ENDPOINT_WINDOWS) {
             return
         }
+        if (now - lastEndpointWindowCleanupMs < ENDPOINT_RATE_LIMIT_WINDOW_MS) {
+            return
+        }
+        lastEndpointWindowCleanupMs = now
         val cutoff = now - (ENDPOINT_RATE_LIMIT_WINDOW_MS * 2)
         endpointRequestWindows.entries.removeIf { (_, requestWindow) ->
             requestWindow.lastAccess < cutoff
