@@ -68,7 +68,3 @@
 # Keep Lifecycle classes
 -keep class androidx.lifecycle.** { *; }
 -dontwarn androidx.lifecycle.**
-
-# Keep WebRTC classes (stream-webrtc-android)
--keep class org.webrtc.** { *; }
--dontwarn org.webrtc.**
