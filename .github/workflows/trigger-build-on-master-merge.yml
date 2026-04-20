@@ -54,14 +54,14 @@ jobs:
 
             const match = latestTag.match(/^v?(\d+)\.(\d+)\.(\d+)$/)
             if (!match) {
-              core.setFailed(`Latest release tag "${latestTag}" is not in the expected format v<major>.<minor>.<patch>`)
+              core.setFailed(`Latest release tag "${latestTag}" is not in the expected semantic versioning format (e.g., v1.2.3 or 1.2.3)`)
               return
             }
 
             const major = Number(match[1])
             const minor = Number(match[2]) + 1
             if (minor > 99) {
-              core.setFailed('Minor version exceeded 99')
+              core.setFailed('Minor version would exceed the maximum allowed value of 99. Please increment the major version instead.')
               return
             }
 
