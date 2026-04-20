@@ -108,6 +108,7 @@ class StreamingServerHelper(
     private val MIN_ENDPOINT_RATE_LIMIT_PER_MINUTE = 1
     private val MAX_ENDPOINT_RATE_LIMIT_PER_MINUTE = 1000
     private val ENDPOINT_RATE_LIMIT_WINDOW_MS = 60 * 1000L
+    private val ENDPOINT_RATE_LIMIT_RETENTION_MULTIPLIER = 2
     private val MAX_TRACKED_ENDPOINT_WINDOWS = 5000
 
     // Connection limits
@@ -205,10 +206,8 @@ class StreamingServerHelper(
 
             if (requestWindow.count >= rateLimit) {
                 isRateLimited = true
-                if (requestWindow.count < Int.MAX_VALUE) {
-                    requestWindow.count++
-                }
-            } else {
+            }
+            if (requestWindow.count < Int.MAX_VALUE) {
                 requestWindow.count++
             }
             requestWindow
@@ -219,14 +218,13 @@ class StreamingServerHelper(
     }
 
     private fun cleanupStaleEndpointRateLimitWindows(now: Long) {
-        if (endpointRequestWindows.size <= MAX_TRACKED_ENDPOINT_WINDOWS) {
-            return
-        }
         if (now - lastEndpointWindowCleanupMs < ENDPOINT_RATE_LIMIT_WINDOW_MS) {
             return
         }
         lastEndpointWindowCleanupMs = now
-        val cutoff = now - (ENDPOINT_RATE_LIMIT_WINDOW_MS * 2)
+        val shouldTrimAggressively = endpointRequestWindows.size > MAX_TRACKED_ENDPOINT_WINDOWS
+        val retentionMultiplier = if (shouldTrimAggressively) 1 else ENDPOINT_RATE_LIMIT_RETENTION_MULTIPLIER
+        val cutoff = now - (ENDPOINT_RATE_LIMIT_WINDOW_MS * retentionMultiplier)
         endpointRequestWindows.entries.removeIf { (_, requestWindow) ->
             requestWindow.lastAccess < cutoff
         }
