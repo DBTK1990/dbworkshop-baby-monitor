@@ -1,0 +1,86 @@
+name: Trigger Build on Master Merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Optional release tag (e.g. v1.0.0)'
+        required: false
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  trigger-build:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve release tag
+        id: resolve
+        uses: actions/github-script@v8
+        env:
+          PROVIDED_TAG: ${{ github.event.inputs.tag }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const providedTag = (process.env.PROVIDED_TAG || '').trim()
+            if (providedTag) {
+              core.info(`Using provided tag: ${providedTag}`)
+              core.setOutput('tag', providedTag)
+              return
+            }
+
+            let latestTag = ''
+            try {
+              const latestRelease = await github.rest.repos.getLatestRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+              })
+              latestTag = (latestRelease.data.tag_name || '').trim()
+              core.info(`Latest release tag: ${latestTag}`)
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error
+              }
+              core.info('No release found. Starting from v0.1.0')
+              core.setOutput('tag', 'v0.1.0')
+              return
+            }
+
+            const match = latestTag.match(/^v?(\d+)\.(\d+)\.(\d+)$/)
+            if (!match) {
+              core.setFailed(`Latest release tag "${latestTag}" is not in the expected format v<major>.<minor>.<patch>`)
+              return
+            }
+
+            const major = Number(match[1])
+            const minor = Number(match[2]) + 1
+            if (minor > 99) {
+              core.setFailed('Minor version exceeded 99')
+              return
+            }
+
+            const nextTag = `v${major}.${minor}.0`
+            core.info(`Calculated next tag: ${nextTag}`)
+            core.setOutput('tag', nextTag)
+
+      - name: Trigger build-release workflow
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'build-release.yml',
+              ref: 'master',
+              inputs: {
+                tag: '${{ steps.resolve.outputs.tag }}',
+              },
+            })
+            core.info('Triggered build-release workflow')
