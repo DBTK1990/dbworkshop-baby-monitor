@@ -83,7 +83,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               workflow_id: 'build-release.yml',
-              ref: 'master',
+              ref: 'main',
               inputs: {
                 tag: process.env.RESOLVED_TAG,
               },
