@@ -19,16 +19,19 @@ jobs:
   trigger-build:
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+    env:
+      MAX_MINOR_VERSION: '99'
     steps:
       - name: Resolve release tag
         id: resolve
         uses: actions/github-script@v8
         env:
-          PROVIDED_TAG: ${{ github.event.inputs.tag }}
+          PROVIDED_TAG: ${{ github.event.inputs.tag || '' }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const providedTag = (process.env.PROVIDED_TAG || '').trim()
+            const maxMinor = Number(process.env.MAX_MINOR_VERSION || '99')
             if (providedTag) {
               core.info(`Using provided tag: ${providedTag}`)
               core.setOutput('tag', providedTag)
@@ -60,8 +63,8 @@ jobs:
 
             const major = Number(match[1])
             const minor = Number(match[2]) + 1
-            if (minor > 99) {
-              core.setFailed('Minor version would exceed the maximum allowed value of 99. Please increment the major version instead.')
+            if (minor > maxMinor) {
+              core.setFailed(`Minor version would exceed the maximum allowed value of ${maxMinor}. Please increment the major version instead.`)
               return
             }
 
@@ -71,6 +74,8 @@ jobs:
 
       - name: Trigger build-release workflow
         uses: actions/github-script@v8
+        env:
+          RESOLVED_TAG: ${{ steps.resolve.outputs.tag }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -80,7 +85,7 @@ jobs:
               workflow_id: 'build-release.yml',
               ref: 'master',
               inputs: {
-                tag: '${{ steps.resolve.outputs.tag }}',
+                tag: process.env.RESOLVED_TAG,
               },
             })
             core.info('Triggered build-release workflow')
