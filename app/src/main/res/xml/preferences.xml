@@ -14,6 +14,13 @@
             android:defaultValue=""
             android:inputType="textPassword"
             android:singleLine="true" />
+        <EditTextPreference
+            android:key="endpoint_rate_limit_per_minute"
+            android:title="Endpoint Rate Limit (requests/min)"
+            android:summary="Maximum requests per IP per endpoint each minute"
+            android:defaultValue="120"
+            android:inputType="number"
+            android:singleLine="true" />
     </PreferenceCategory>
 
     <PreferenceCategory android:title="Camera Registration">

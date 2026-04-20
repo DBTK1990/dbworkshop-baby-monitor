@@ -115,6 +115,22 @@ class SettingsActivity : AppCompatActivity() {
                 }
             }
 
+            // Add validation for endpoint rate limit
+            findPreference<EditTextPreference>("endpoint_rate_limit_per_minute")?.apply {
+                setOnPreferenceChangeListener { _, newValue ->
+                    val rateLimit = newValue.toString()
+                    if (!InputValidator.isValidEndpointRateLimit(rateLimit)) {
+                        Toast.makeText(
+                            requireContext(),
+                            "Rate limit must be between 1 and 1000 requests per minute",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        return@setOnPreferenceChangeListener false
+                    }
+                    true
+                }
+            }
+
             // Add validation for certificate password
             findPreference<EditTextPreference>("certificate_password")?.apply {
                 // Do not pre-fill the existing certificate password when editing

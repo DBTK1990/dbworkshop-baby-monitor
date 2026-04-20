@@ -68,6 +68,11 @@ class StreamingServerHelper(
         var blockedUntil: Long = 0L
     )
 
+    private data class RequestWindow(
+        var count: Int = 0,
+        var windowStart: Long = 0L
+    )
+
     private data class RtspClient(
         val sessionId: String,
         val socket: Socket,
@@ -88,6 +93,7 @@ class StreamingServerHelper(
     private val clients = CopyOnWriteArrayList<Client>()
     private val rtspClients = ConcurrentHashMap<String, RtspClient>()
     private val failedAttempts = ConcurrentHashMap<String, FailedAttempt>()
+    private val endpointRequestWindows = ConcurrentHashMap<String, RequestWindow>()
     @Volatile
     private var appInForeground: Boolean = true
     // SECURITY: Rate limiting constants (only for unauthenticated connections)
@@ -95,6 +101,10 @@ class StreamingServerHelper(
     private val BLOCK_DURATION_MS = 15 * 60 * 1000L // 15 minutes block for unauthenticated
     private val RESET_WINDOW_MS = 10 * 60 * 1000L // 10 minutes reset window
     private val MAX_HTTP_HEADER_LINE_LENGTH = 8192
+    private val DEFAULT_ENDPOINT_RATE_LIMIT_PER_MINUTE = 120
+    private val MIN_ENDPOINT_RATE_LIMIT_PER_MINUTE = 1
+    private val MAX_ENDPOINT_RATE_LIMIT_PER_MINUTE = 1000
+    private val ENDPOINT_RATE_LIMIT_WINDOW_MS = 60 * 1000L
 
     // Connection limits
     private val MAX_CONNECTION_DURATION_MS = 30 * 60 * 1000L // 30 minutes max per connection (unauthenticated)
@@ -148,6 +158,53 @@ class StreamingServerHelper(
         if (attempt.count >= MAX_FAILED_ATTEMPTS) {
             attempt.blockedUntil = now + BLOCK_DURATION_MS
             onLog("SECURITY: IP $clientIp blocked for ${BLOCK_DURATION_MS / (60 * 1000)} minutes due to too many unauthenticated attempts")
+        }
+    }
+
+    private fun getConfiguredEndpointRateLimitPerMinute(): Int {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+        val configuredLimit = prefs.getString(
+            "endpoint_rate_limit_per_minute",
+            DEFAULT_ENDPOINT_RATE_LIMIT_PER_MINUTE.toString()
+        )?.toIntOrNull()
+
+        return configuredLimit
+            ?.coerceIn(MIN_ENDPOINT_RATE_LIMIT_PER_MINUTE, MAX_ENDPOINT_RATE_LIMIT_PER_MINUTE)
+            ?: DEFAULT_ENDPOINT_RATE_LIMIT_PER_MINUTE
+    }
+
+    private fun normalizeEndpointPath(uri: String): String {
+        val path = when {
+            uri.startsWith("rtsp://", ignoreCase = true) -> {
+                val slashIndex = uri.indexOf('/', startIndex = 7)
+                if (slashIndex == -1) "/" else uri.substring(slashIndex)
+            }
+            else -> uri
+        }
+        return path.substringBefore("?")
+    }
+
+    private fun isEndpointRateLimited(clientIp: String, uri: String): Boolean {
+        val now = System.currentTimeMillis()
+        val rateLimit = getConfiguredEndpointRateLimitPerMinute()
+        val endpointPath = normalizeEndpointPath(uri)
+        val windowKey = "$clientIp|$endpointPath"
+        val requestWindow = endpointRequestWindows.getOrPut(windowKey) {
+            RequestWindow(windowStart = now)
+        }
+
+        synchronized(requestWindow) {
+            if (now - requestWindow.windowStart >= ENDPOINT_RATE_LIMIT_WINDOW_MS) {
+                requestWindow.count = 0
+                requestWindow.windowStart = now
+            }
+
+            if (requestWindow.count >= rateLimit) {
+                return true
+            }
+
+            requestWindow.count++
+            return false
         }
     }
 
@@ -450,6 +507,15 @@ class StreamingServerHelper(
                     ?.substringAfter(":")
                     ?.trim()
                     ?: "1"
+
+                if (isEndpointRateLimited(clientIp, uri)) {
+                    sendRtspResponse(
+                        outputStream = outputStream,
+                        statusLine = "RTSP/1.0 429 Too Many Requests",
+                        cSeq = cSeq
+                    )
+                    continue
+                }
 
                 if (!isRtspAuthenticated(headers, uri, clientIp)) {
                     sendRtspResponse(
@@ -875,6 +941,16 @@ a=control:$normalizedUri
             val requestParts = requestLine.split(" ")
             if (requestParts.size < 2) return
             val uri = requestParts[1]
+
+            if (isEndpointRateLimited(clientIp, uri)) {
+                writer.print("HTTP/1.1 429 Too Many Requests\r\n")
+                writer.print("Retry-After: 60\r\n")
+                writer.print("Connection: close\r\n\r\n")
+                writer.flush()
+                socket.close()
+                onLog("SECURITY: Endpoint rate limit exceeded for $clientIp on ${normalizeEndpointPath(uri)}")
+                return
+            }
 
             val secureStorage = SecureStorage(context)
             val rawUsername = secureStorage.getSecureString(SecureStorage.KEY_USERNAME, "") ?: ""

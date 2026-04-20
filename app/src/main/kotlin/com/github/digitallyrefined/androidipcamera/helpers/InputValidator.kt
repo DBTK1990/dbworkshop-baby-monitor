@@ -59,6 +59,16 @@ object InputValidator {
         }
     }
 
+    // Endpoint rate limit validation (requests per minute)
+    fun isValidEndpointRateLimit(rateLimit: String): Boolean {
+        return try {
+            val requestsPerMinute = rateLimit.toInt()
+            requestsPerMinute in 1..1000
+        } catch (e: NumberFormatException) {
+            false
+        }
+    }
+
     // Camera resolution validation
     fun isValidCameraResolution(resolution: String): Boolean {
         return resolution in listOf("low", "medium", "high")
