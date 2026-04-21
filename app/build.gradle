@@ -107,6 +107,9 @@ dependencies {
     implementation 'androidx.camera:camera-lifecycle:1.4.0'
     implementation 'androidx.camera:camera-view:1.4.0'
 
+    // ListenableFuture — CameraX 1.5.x no longer ships guava transitively
+    implementation 'com.google.guava:listenablefuture:1.0'
+
     // Coroutines for asynchronous operations
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.6.2'
