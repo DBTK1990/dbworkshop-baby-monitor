@@ -434,9 +434,9 @@ class StreamingService : LifecycleService() {
             this.cameraProvider = cameraProvider
 
             // Initialize camera resolution helper if not already done
+            val cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
             if (cameraResolutionHelper == null) {
                 cameraResolutionHelper = CameraResolutionHelper(this)
-                val cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
                 val cameraId = getCameraId(cameraManager)
                 cameraResolutionHelper?.initializeResolutions(cameraId)
             }
