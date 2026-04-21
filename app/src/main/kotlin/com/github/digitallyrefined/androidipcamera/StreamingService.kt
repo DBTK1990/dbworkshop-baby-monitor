@@ -367,7 +367,7 @@ class StreamingService : LifecycleService() {
             )
         }
         streamingServerHelper?.startStreamingServer()
-        withContext(Dispatchers.Main) {
+        withContext(Dispatchers.IO) {
             stopRtspStream()
             startRtspStream()
         }
@@ -408,11 +408,7 @@ class StreamingService : LifecycleService() {
     }
 
     private fun stopCamera() {
-        if (cameraXSource != null) {
-            imageAnalyzer?.let { cameraProvider?.unbind(it) }
-        } else {
-            cameraProvider?.unbindAll()
-        }
+        cameraProvider?.unbindAll()
         imageAnalyzer = null
         camera = null
     }
@@ -712,6 +708,11 @@ class StreamingService : LifecycleService() {
         val username = (secureStorage.getSecureString(SecureStorage.KEY_USERNAME, "") ?: "").trim()
         val password = secureStorage.getSecureString(SecureStorage.KEY_PASSWORD, "") ?: ""
 
+        if (!InputValidator.isValidUsername(username) || !InputValidator.isValidPassword(password)) {
+            AppLogger.w(TAG, "RTSP server not started: credentials not configured")
+            return
+        }
+
         val source = CameraXSource(this)
         cameraXSource = source
 
@@ -729,9 +730,7 @@ class StreamingService : LifecycleService() {
         )
         rtspServerStream = server
 
-        if (InputValidator.isValidUsername(username) && InputValidator.isValidPassword(password)) {
-            server.getStreamClient().setAuthorization(username, password)
-        }
+        server.getStreamClient().setAuthorization(username, password)
 
         server.getStreamClient().setClientListener(object : ClientListener {
             override fun onClientConnected(client: ServerClient) {
@@ -750,7 +749,13 @@ class StreamingService : LifecycleService() {
         })
 
         server.prepareVideo(1280, 720, 2_000_000)
-        server.prepareAudio(44100, false, 128_000)
+        val hasMicPermission = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        if (hasMicPermission) {
+            server.prepareAudio(44100, false, 128_000)
+        } else {
+            AppLogger.w(TAG, "RTSP audio disabled: RECORD_AUDIO permission not granted")
+        }
         server.startStream()
         AppLogger.i(TAG, "RTSP server listening on port $RTSP_PORT")
     }
