@@ -22,6 +22,8 @@ import android.os.IBinder
 import android.util.Log
 import android.util.Size
 import android.widget.Toast
+import androidx.camera.camera2.interop.Camera2CameraInfo
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
@@ -502,10 +504,19 @@ class StreamingService : LifecycleService() {
                     useCases.add(preview)
                 }
 
+                // Resolve the specific camera: for back-facing, pick the main lens by focal
+                // length (median) so CameraX doesn't default to the ultrawide on multi-camera
+                // devices. Front camera keeps DEFAULT_FRONT_CAMERA as-is.
+                val cameraSelector = if (lensFacing == CameraSelector.DEFAULT_BACK_CAMERA) {
+                    buildMainBackCameraSelector(cameraManager)
+                } else {
+                    lensFacing
+                }
+
                 // Bind to Service Lifecycle
                 camera = cameraProvider.bindToLifecycle(
                     this,
-                    lensFacing,
+                    cameraSelector,
                     *useCases.toTypedArray()
                 )
 
@@ -521,12 +532,7 @@ class StreamingService : LifecycleService() {
 
     private fun getCameraId(cameraManager: CameraManager): String {
         return when (lensFacing) {
-            CameraSelector.DEFAULT_BACK_CAMERA -> {
-                cameraManager.cameraIdList.find { id ->
-                    val characteristics = cameraManager.getCameraCharacteristics(id)
-                    characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
-                } ?: "0"
-            }
+            CameraSelector.DEFAULT_BACK_CAMERA -> getMainBackCameraId(cameraManager)
             CameraSelector.DEFAULT_FRONT_CAMERA -> {
                 cameraManager.cameraIdList.find { id ->
                     val characteristics = cameraManager.getCameraCharacteristics(id)
@@ -535,6 +541,30 @@ class StreamingService : LifecycleService() {
             }
             else -> "0"
         }
+    }
+
+    // Returns the camera ID of the main (non-ultrawide, non-telephoto) back lens.
+    // Sorts back-facing cameras by max focal length ascending: ultrawide has the shortest
+    // focal length, telephoto the longest. The median entry is the regular 1x lens.
+    private fun getMainBackCameraId(cameraManager: CameraManager): String {
+        val backCameras = cameraManager.cameraIdList.mapNotNull { id ->
+            val chars = cameraManager.getCameraCharacteristics(id)
+            if (chars.get(CameraCharacteristics.LENS_FACING) != CameraCharacteristics.LENS_FACING_BACK) return@mapNotNull null
+            val focal = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.maxOrNull() ?: 0f
+            id to focal
+        }.sortedBy { it.second }
+        return backCameras.getOrNull(backCameras.size / 2)?.first ?: "0"
+    }
+
+    @OptIn(ExperimentalCamera2Interop::class)
+    private fun buildMainBackCameraSelector(cameraManager: CameraManager): CameraSelector {
+        val mainId = getMainBackCameraId(cameraManager)
+        return CameraSelector.Builder()
+            .addCameraFilter { cameraInfos ->
+                cameraInfos.filter { Camera2CameraInfo.from(it).cameraId == mainId }
+                    .ifEmpty { cameraInfos }
+            }
+            .build()
     }
 
     private fun applyCameraSettings() {
