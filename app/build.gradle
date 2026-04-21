@@ -90,6 +90,18 @@ android {
     }
 }
 
+// RootEncoder pulls in com.google.guava:listenablefuture:9999.0-empty-to-avoid-conflict-with-guava
+// transitively. Gradle's version resolution promotes this (9999 > 1) over listenablefuture:1.0,
+// leaving ListenableFuture.class absent from the compile classpath and causing "Cannot access class"
+// errors. We fix this by:
+//   1. Adding full Guava directly (provides ListenableFuture.class on our compile classpath).
+//   2. Forcing the empty stub so only one artifact provides the class (prevents Dex duplicate errors).
+configurations.all {
+    resolutionStrategy {
+        force 'com.google.guava:listenablefuture:9999.0-empty-to-avoid-conflict-with-guava'
+    }
+}
+
 dependencies {
     implementation 'androidx.core:core-ktx:1.12.0'
     implementation 'androidx.appcompat:appcompat:1.6.1'
@@ -107,8 +119,10 @@ dependencies {
     implementation 'androidx.camera:camera-lifecycle:1.4.0'
     implementation 'androidx.camera:camera-view:1.4.0'
 
-    // ListenableFuture — needed when CameraX 1.5.x does not ship guava transitively
-    implementation 'androidx.concurrent:concurrent-futures:1.1.0'
+    // ListenableFuture — com.google.guava:guava ships the class directly on our compile classpath.
+    // The concurrent-futures wrapper is not needed; the resolutionStrategy above forces the empty
+    // listenablefuture stub so the Dex merger doesn't see duplicate classes.
+    implementation 'com.google.guava:guava:33.3.1-android'
 
     // Coroutines for asynchronous operations
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
