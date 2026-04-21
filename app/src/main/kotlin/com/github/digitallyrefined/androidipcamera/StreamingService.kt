@@ -412,7 +412,13 @@ class StreamingService : LifecycleService() {
     }
 
     private fun stopCamera() {
-        cameraProvider?.unbindAll()
+        if (cameraXSource != null) {
+            // Only unbind our ImageAnalysis use case — do NOT call unbindAll() which
+            // would also tear down CameraXSource's Preview binding and starve the RTSP encoder.
+            imageAnalyzer?.let { cameraProvider?.unbind(it) }
+        } else {
+            cameraProvider?.unbindAll()
+        }
         imageAnalyzer = null
         camera = null
     }
@@ -742,14 +748,20 @@ class StreamingService : LifecycleService() {
             server.getStreamClient().setClientListener(object : ClientListener {
                 override fun onClientConnected(client: ServerClient) {
                     AppLogger.i(TAG, "RTSP client connected")
-                    launchMain { onClientConnected?.invoke() }
+                    launchMain {
+                        onClientConnected?.invoke()
+                        startCameraIfNeeded()
+                    }
                 }
                 override fun onClientDisconnected(client: ServerClient) {
                     AppLogger.i(TAG, "RTSP client disconnected")
                     val hasMjpegClients = streamingServerHelper?.hasAnyStreamingClients() == true
                     val hasRtspClients = server.getStreamClient().getNumClients() > 0
                     if (!hasMjpegClients && !hasRtspClients) {
-                        launchMain { onClientDisconnected?.invoke() }
+                        launchMain {
+                            stopCamera()
+                            onClientDisconnected?.invoke()
+                        }
                     }
                 }
                 override fun onClientNewBitrate(bitrate: Long, client: ServerClient) {}
