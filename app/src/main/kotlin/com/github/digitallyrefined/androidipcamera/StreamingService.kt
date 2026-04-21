@@ -414,65 +414,63 @@ class StreamingService : LifecycleService() {
     }
 
     private fun startCamera() {
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
-
-        cameraProviderFuture.addListener({
-            val cameraProvider = cameraProviderFuture.get()
-            this.cameraProvider = cameraProvider
-
-            // Initialize camera resolution helper if not already done
-            if (cameraResolutionHelper == null) {
-                cameraResolutionHelper = CameraResolutionHelper(this)
-                val cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
-                val cameraId = getCameraId(cameraManager)
-                cameraResolutionHelper?.initializeResolutions(cameraId)
-            }
-
-            // Save old analyzer to selectively unbind it below
-            val oldAnalyzer = imageAnalyzer
-
-            // Image Analysis (Streaming)
-            imageAnalyzer = ImageAnalysis.Builder()
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
-                .apply {
-                    val prefs = PreferenceManager.getDefaultSharedPreferences(this@StreamingService)
-                    val quality = prefs.getString("camera_resolution", "low") ?: "low"
-                    val targetResolution = cameraResolutionHelper?.getResolutionForQuality(quality)
-
-                    if (targetResolution != null) {
-                        setResolutionSelector(
-                            ResolutionSelector.Builder()
-                                .setResolutionStrategy(ResolutionStrategy(targetResolution, ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
-                                .build()
-                        )
-                    } else {
-                        val fallbackResolution = when (quality) {
-                            "high" -> Size(1280, 720)
-                            "medium" -> Size(960, 720)
-                            "low" -> Size(800, 600)
-                            else -> Size(800, 600)
-                        }
-                        setResolutionSelector(
-                            ResolutionSelector.Builder()
-                                .setResolutionStrategy(ResolutionStrategy(fallbackResolution, ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
-                                .build()
-                        )
-                    }
-                }
-                .build()
-                .also { analysis ->
-                    cameraExecutor?.let { executor ->
-                        analysis.setAnalyzer(executor) { image ->
-                            if (streamingServerHelper?.hasAnyStreamingClients() == true) {
-                                processImage(image)
-                            }
-                            image.close()
-                        }
-                    }
-                }
-
+        lifecycleScope.launch(Dispatchers.Main) {
             try {
+                val cameraProvider = ProcessCameraProvider.awaitInstance(this@StreamingService)
+                this@StreamingService.cameraProvider = cameraProvider
+
+                // Initialize camera resolution helper if not already done
+                if (cameraResolutionHelper == null) {
+                    cameraResolutionHelper = CameraResolutionHelper(this@StreamingService)
+                    val cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+                    val cameraId = getCameraId(cameraManager)
+                    cameraResolutionHelper?.initializeResolutions(cameraId)
+                }
+
+                // Save old analyzer to selectively unbind it below
+                val oldAnalyzer = imageAnalyzer
+
+                // Image Analysis (Streaming)
+                imageAnalyzer = ImageAnalysis.Builder()
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
+                    .apply {
+                        val prefs = PreferenceManager.getDefaultSharedPreferences(this@StreamingService)
+                        val quality = prefs.getString("camera_resolution", "low") ?: "low"
+                        val targetResolution = cameraResolutionHelper?.getResolutionForQuality(quality)
+
+                        if (targetResolution != null) {
+                            setResolutionSelector(
+                                ResolutionSelector.Builder()
+                                    .setResolutionStrategy(ResolutionStrategy(targetResolution, ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
+                                    .build()
+                            )
+                        } else {
+                            val fallbackResolution = when (quality) {
+                                "high" -> Size(1280, 720)
+                                "medium" -> Size(960, 720)
+                                "low" -> Size(800, 600)
+                                else -> Size(800, 600)
+                            }
+                            setResolutionSelector(
+                                ResolutionSelector.Builder()
+                                    .setResolutionStrategy(ResolutionStrategy(fallbackResolution, ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
+                                    .build()
+                            )
+                        }
+                    }
+                    .build()
+                    .also { analysis ->
+                        cameraExecutor?.let { executor ->
+                            analysis.setAnalyzer(executor) { image ->
+                                if (streamingServerHelper?.hasAnyStreamingClients() == true) {
+                                    processImage(image)
+                                }
+                                image.close()
+                            }
+                        }
+                    }
+
                 // When CameraXSource is active, only unbind our own use cases to preserve
                 // CameraXSource's Preview binding in the shared camera session.
                 if (cameraXSource != null) {
@@ -493,7 +491,7 @@ class StreamingService : LifecycleService() {
 
                 // Bind to Service Lifecycle
                 camera = cameraProvider.bindToLifecycle(
-                    this,
+                    this@StreamingService,
                     lensFacing,
                     *useCases.toTypedArray()
                 )
@@ -505,7 +503,7 @@ class StreamingService : LifecycleService() {
                 Log.e(TAG, "Use case binding failed", exc)
                 AppLogger.e(TAG, "Camera use-case binding failed: ${exc.message}")
             }
-        }, ContextCompat.getMainExecutor(this))
+        }
     }
 
     private fun getCameraId(cameraManager: CameraManager): String {
@@ -719,6 +717,7 @@ class StreamingService : LifecycleService() {
         val server = RtspServerStream(
             this, RTSP_PORT,
             object : ConnectChecker {
+                override fun onConnectionStarted(url: String) {}
                 override fun onConnectionSuccess() { AppLogger.i(TAG, "RTSP stream started") }
                 override fun onConnectionFailed(reason: String) { AppLogger.e(TAG, "RTSP stream failed: $reason") }
                 override fun onNewBitrate(bitrate: Long) {}
