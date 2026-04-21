@@ -367,7 +367,7 @@ class StreamingService : LifecycleService() {
             )
         }
         streamingServerHelper?.startStreamingServer()
-        withContext(Dispatchers.IO) {
+        withContext(Dispatchers.Main.immediate) {
             try {
                 stopRtspStream()
                 startRtspStream()
