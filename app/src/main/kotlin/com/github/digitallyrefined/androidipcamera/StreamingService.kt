@@ -367,9 +367,13 @@ class StreamingService : LifecycleService() {
             )
         }
         streamingServerHelper?.startStreamingServer()
-        withContext(Dispatchers.IO) {
-            stopRtspStream()
-            startRtspStream()
+        withContext(Dispatchers.Main) {
+            try {
+                stopRtspStream()
+                startRtspStream()
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "RTSP startup failed: ${e.message}")
+            }
         }
         Log.i(TAG, "Requested HTTPS server start on port $STREAM_PORT")
         AppLogger.i(TAG, "Requested HTTPS server start on port $STREAM_PORT")
@@ -714,52 +718,66 @@ class StreamingService : LifecycleService() {
             return
         }
 
-        val source = CameraXSource(this)
-        cameraXSource = source
+        try {
+            val source = CameraXSource(this)
+            cameraXSource = source
 
-        val server = RtspServerStream(
-            this, RTSP_PORT,
-            object : ConnectChecker {
-                override fun onConnectionStarted(url: String) {}
-                override fun onConnectionSuccess() { AppLogger.i(TAG, "RTSP stream started") }
-                override fun onConnectionFailed(reason: String) { AppLogger.e(TAG, "RTSP stream failed: $reason") }
-                override fun onNewBitrate(bitrate: Long) {}
-                override fun onDisconnect() { AppLogger.i(TAG, "RTSP stream stopped") }
-                override fun onAuthError() { AppLogger.w(TAG, "RTSP auth error") }
-                override fun onAuthSuccess() {}
-            },
-            source, MicrophoneSource()
-        )
-        rtspServerStream = server
+            val server = RtspServerStream(
+                this, RTSP_PORT,
+                object : ConnectChecker {
+                    override fun onConnectionStarted(url: String) {}
+                    override fun onConnectionSuccess() { AppLogger.i(TAG, "RTSP stream started") }
+                    override fun onConnectionFailed(reason: String) { AppLogger.e(TAG, "RTSP stream failed: $reason") }
+                    override fun onNewBitrate(bitrate: Long) {}
+                    override fun onDisconnect() { AppLogger.i(TAG, "RTSP stream stopped") }
+                    override fun onAuthError() { AppLogger.w(TAG, "RTSP auth error") }
+                    override fun onAuthSuccess() {}
+                },
+                source, MicrophoneSource()
+            )
+            rtspServerStream = server
 
-        server.getStreamClient().setAuthorization(username, password)
+            server.getStreamClient().setAuthorization(username, password)
 
-        server.getStreamClient().setClientListener(object : ClientListener {
-            override fun onClientConnected(client: ServerClient) {
-                AppLogger.i(TAG, "RTSP client connected")
-                launchMain { onClientConnected?.invoke() }
-            }
-            override fun onClientDisconnected(client: ServerClient) {
-                AppLogger.i(TAG, "RTSP client disconnected")
-                val hasMjpegClients = streamingServerHelper?.hasAnyStreamingClients() == true
-                val hasRtspClients = server.getStreamClient().getNumClients() > 0
-                if (!hasMjpegClients && !hasRtspClients) {
-                    launchMain { onClientDisconnected?.invoke() }
+            server.getStreamClient().setClientListener(object : ClientListener {
+                override fun onClientConnected(client: ServerClient) {
+                    AppLogger.i(TAG, "RTSP client connected")
+                    launchMain { onClientConnected?.invoke() }
                 }
-            }
-            override fun onClientNewBitrate(bitrate: Long, client: ServerClient) {}
-        })
+                override fun onClientDisconnected(client: ServerClient) {
+                    AppLogger.i(TAG, "RTSP client disconnected")
+                    val hasMjpegClients = streamingServerHelper?.hasAnyStreamingClients() == true
+                    val hasRtspClients = server.getStreamClient().getNumClients() > 0
+                    if (!hasMjpegClients && !hasRtspClients) {
+                        launchMain { onClientDisconnected?.invoke() }
+                    }
+                }
+                override fun onClientNewBitrate(bitrate: Long, client: ServerClient) {}
+            })
 
-        server.prepareVideo(1280, 720, 2_000_000)
-        val hasMicPermission = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
-            PackageManager.PERMISSION_GRANTED
-        if (hasMicPermission) {
-            server.prepareAudio(44100, false, 128_000)
-        } else {
-            AppLogger.w(TAG, "RTSP audio disabled: RECORD_AUDIO permission not granted")
+            val videoPrepared = server.prepareVideo(1280, 720, 2_000_000)
+            if (!videoPrepared) {
+                AppLogger.e(TAG, "RTSP server failed to prepare video")
+                stopRtspStream()
+                return
+            }
+
+            val hasMicPermission = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED
+            if (hasMicPermission) {
+                val audioPrepared = server.prepareAudio(44100, false, 128_000)
+                if (!audioPrepared) {
+                    AppLogger.w(TAG, "RTSP audio prepare failed; continuing video-only stream")
+                }
+            } else {
+                AppLogger.w(TAG, "RTSP audio disabled: RECORD_AUDIO permission not granted")
+            }
+            server.startStream()
+            AppLogger.i(TAG, "RTSP server listening on port $RTSP_PORT")
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "Error starting RTSP stream: ${e.message}")
+            stopRtspStream()
         }
-        server.startStream()
-        AppLogger.i(TAG, "RTSP server listening on port $RTSP_PORT")
     }
 
     private fun stopRtspStream() {
