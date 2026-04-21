@@ -20,6 +20,7 @@ import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import android.util.Range
 import android.util.Size
 import android.widget.Toast
 import androidx.camera.camera2.interop.Camera2CameraInfo
@@ -447,6 +448,7 @@ class StreamingService : LifecycleService() {
             imageAnalyzer = ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
+                .setTargetFrameRate(Range(30, 30))
                 .apply {
                     val prefs = PreferenceManager.getDefaultSharedPreferences(this@StreamingService)
                     val quality = prefs.getString("camera_resolution", "low") ?: "low"
@@ -797,7 +799,12 @@ class StreamingService : LifecycleService() {
                 override fun onClientNewBitrate(bitrate: Long, client: ServerClient) {}
             })
 
-            val videoPrepared = server.prepareVideo(1280, 720, 2_000_000)
+            val videoPrepared = server.prepareVideo(
+                width = 1280, height = 720,
+                bitrate = 1_500_000,
+                fps = 30,
+                iFrameInterval = 1
+            )
             if (!videoPrepared) {
                 AppLogger.e(TAG, "RTSP server failed to prepare video")
                 safeStopRtspStream("video preparation failure")
