@@ -367,12 +367,12 @@ class StreamingService : LifecycleService() {
             )
         }
         streamingServerHelper?.startStreamingServer()
-        withContext(Dispatchers.Main) {
+        withContext(Dispatchers.IO) {
             try {
                 stopRtspStream()
                 startRtspStream()
             } catch (e: Exception) {
-                AppLogger.e(TAG, "RTSP startup failed: ${e.message}")
+                AppLogger.e(TAG, "Failed to restart RTSP stream", e)
             }
         }
         Log.i(TAG, "Requested HTTPS server start on port $STREAM_PORT")
@@ -758,7 +758,7 @@ class StreamingService : LifecycleService() {
             val videoPrepared = server.prepareVideo(1280, 720, 2_000_000)
             if (!videoPrepared) {
                 AppLogger.e(TAG, "RTSP server failed to prepare video")
-                stopRtspStream()
+                safeStopRtspStream("video preparation failure")
                 return
             }
 
@@ -775,8 +775,19 @@ class StreamingService : LifecycleService() {
             server.startStream()
             AppLogger.i(TAG, "RTSP server listening on port $RTSP_PORT")
         } catch (e: Exception) {
-            AppLogger.e(TAG, "Error starting RTSP stream: ${e.message}")
+            AppLogger.e(TAG, "Error starting RTSP stream", e)
+            safeStopRtspStream("startup failure")
+        }
+    }
+
+    private fun safeStopRtspStream(reason: String) {
+        if (rtspServerStream == null && cameraXSource == null) {
+            return
+        }
+        try {
             stopRtspStream()
+        } catch (cleanupError: Exception) {
+            AppLogger.e(TAG, "Error cleaning up RTSP stream after $reason", cleanupError)
         }
     }
 
