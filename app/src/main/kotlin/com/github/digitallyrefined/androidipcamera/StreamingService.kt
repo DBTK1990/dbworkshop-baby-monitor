@@ -37,9 +37,16 @@ import androidx.lifecycle.lifecycleScope
 import androidx.preference.PreferenceManager
 import com.github.digitallyrefined.androidipcamera.helpers.*
 import com.github.digitallyrefined.androidipcamera.helpers.AppLogger
+import com.pedro.common.ConnectChecker
+import com.pedro.encoder.input.sources.audio.MicrophoneSource
+import com.pedro.extrasources.CameraXSource
+import com.pedro.rtspserver.RtspServerStream
+import com.pedro.rtspserver.server.ClientListener
+import com.pedro.rtspserver.server.ServerClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.Inet4Address
 import java.net.NetworkInterface
@@ -58,6 +65,8 @@ class StreamingService : LifecycleService() {
     private var lastFrameTime = 0L
     private var lensFacing = CameraSelector.DEFAULT_BACK_CAMERA
     private var cameraResolutionHelper: CameraResolutionHelper? = null
+    private var rtspServerStream: RtspServerStream? = null
+    private var cameraXSource: CameraXSource? = null
     // UI Callbacks
     var onClientConnected: (() -> Unit)? = null
     var onClientDisconnected: (() -> Unit)? = null
@@ -88,6 +97,7 @@ class StreamingService : LifecycleService() {
     companion object {
         private const val TAG = "StreamingService"
         private const val STREAM_PORT = 4444
+        private const val RTSP_PORT = 8554
         private const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "streaming_service_channel"
         private const val PREF_LAST_CAMERA_FACING = "last_camera_facing"
@@ -178,6 +188,7 @@ class StreamingService : LifecycleService() {
             }
         }
         cameraExecutor?.shutdown()
+        stopRtspStream()
         stopCamera()
         lifecycleScope.launch(Dispatchers.IO) {
             streamingServerHelper?.stopStreamingServer()
@@ -342,8 +353,9 @@ class StreamingService : LifecycleService() {
                     }
                 },
                 onClientDisconnected = {
-                    val hasAnyStreamingClients = streamingServerHelper?.hasAnyStreamingClients() ?: false
-                    if (!hasAnyStreamingClients) {
+                    val hasMjpegClients = streamingServerHelper?.hasAnyStreamingClients() ?: false
+                    val hasRtspClients = (rtspServerStream?.getStreamClient()?.getNumClients() ?: 0) > 0
+                    if (!hasMjpegClients && !hasRtspClients) {
                         launchMain {
                             AppLogger.i(TAG, "All clients disconnected")
                             stopCamera()
@@ -355,6 +367,10 @@ class StreamingService : LifecycleService() {
             )
         }
         streamingServerHelper?.startStreamingServer()
+        withContext(Dispatchers.IO) {
+            stopRtspStream()
+            startRtspStream()
+        }
         Log.i(TAG, "Requested HTTPS server start on port $STREAM_PORT")
         AppLogger.i(TAG, "Requested HTTPS server start on port $STREAM_PORT")
         val localIpAddress = getLocalIpAddress()
@@ -412,6 +428,9 @@ class StreamingService : LifecycleService() {
                 cameraResolutionHelper?.initializeResolutions(cameraId)
             }
 
+            // Save old analyzer to selectively unbind it below
+            val oldAnalyzer = imageAnalyzer
+
             // Image Analysis (Streaming)
             imageAnalyzer = ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
@@ -428,8 +447,7 @@ class StreamingService : LifecycleService() {
                                 .build()
                         )
                     } else {
-                        // Fallback
-                         val fallbackResolution = when (quality) {
+                        val fallbackResolution = when (quality) {
                             "high" -> Size(1280, 720)
                             "medium" -> Size(960, 720)
                             "low" -> Size(800, 600)
@@ -455,13 +473,20 @@ class StreamingService : LifecycleService() {
                 }
 
             try {
-                cameraProvider.unbindAll()
+                // When CameraXSource is active, only unbind our own use cases to preserve
+                // CameraXSource's Preview binding in the shared camera session.
+                if (cameraXSource != null) {
+                    val old = oldAnalyzer
+                    if (old != null) cameraProvider.unbind(old)
+                } else {
+                    cameraProvider.unbindAll()
+                }
 
                 // Build Use Cases
                 val useCases = mutableListOf<androidx.camera.core.UseCase>(imageAnalyzer!!)
 
-                // Add Preview if surface provider is available
-                if (currentSurfaceProvider != null) {
+                // Add UI Preview only when CameraXSource is not managing the Preview use case
+                if (currentSurfaceProvider != null && cameraXSource == null) {
                     val preview = Preview.Builder().build()
                     preview.setSurfaceProvider(currentSurfaceProvider)
                     useCases.add(preview)
@@ -677,6 +702,74 @@ class StreamingService : LifecycleService() {
 
         streamingServerHelper?.broadcastFrame(jpegBytes)
 
+    }
+
+    private fun startRtspStream() {
+        val secureStorage = SecureStorage(this)
+        val username = (secureStorage.getSecureString(SecureStorage.KEY_USERNAME, "") ?: "").trim()
+        val password = secureStorage.getSecureString(SecureStorage.KEY_PASSWORD, "") ?: ""
+
+        if (!InputValidator.isValidUsername(username) || !InputValidator.isValidPassword(password)) {
+            AppLogger.w(TAG, "RTSP server not started: credentials not configured")
+            return
+        }
+
+        val source = CameraXSource(this)
+        cameraXSource = source
+
+        val server = RtspServerStream(
+            this, RTSP_PORT,
+            object : ConnectChecker {
+                override fun onConnectionStarted(url: String) {}
+                override fun onConnectionSuccess() { AppLogger.i(TAG, "RTSP stream started") }
+                override fun onConnectionFailed(reason: String) { AppLogger.e(TAG, "RTSP stream failed: $reason") }
+                override fun onNewBitrate(bitrate: Long) {}
+                override fun onDisconnect() { AppLogger.i(TAG, "RTSP stream stopped") }
+                override fun onAuthError() { AppLogger.w(TAG, "RTSP auth error") }
+                override fun onAuthSuccess() {}
+            },
+            source, MicrophoneSource()
+        )
+        rtspServerStream = server
+
+        server.getStreamClient().setAuthorization(username, password)
+
+        server.getStreamClient().setClientListener(object : ClientListener {
+            override fun onClientConnected(client: ServerClient) {
+                AppLogger.i(TAG, "RTSP client connected")
+                launchMain { onClientConnected?.invoke() }
+            }
+            override fun onClientDisconnected(client: ServerClient) {
+                AppLogger.i(TAG, "RTSP client disconnected")
+                val hasMjpegClients = streamingServerHelper?.hasAnyStreamingClients() == true
+                val hasRtspClients = server.getStreamClient().getNumClients() > 0
+                if (!hasMjpegClients && !hasRtspClients) {
+                    launchMain { onClientDisconnected?.invoke() }
+                }
+            }
+            override fun onClientNewBitrate(bitrate: Long, client: ServerClient) {}
+        })
+
+        server.prepareVideo(1280, 720, 2_000_000)
+        val hasMicPermission = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        if (hasMicPermission) {
+            server.prepareAudio(44100, false, 128_000)
+        } else {
+            AppLogger.w(TAG, "RTSP audio disabled: RECORD_AUDIO permission not granted")
+        }
+        server.startStream()
+        AppLogger.i(TAG, "RTSP server listening on port $RTSP_PORT")
+    }
+
+    private fun stopRtspStream() {
+        try {
+            rtspServerStream?.stopStream()
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "Error stopping RTSP stream: ${e.message}")
+        }
+        rtspServerStream = null
+        cameraXSource = null
     }
 
     private fun generateRandomPassword(): String {

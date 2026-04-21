@@ -68,3 +68,12 @@
 # Keep Lifecycle classes
 -keep class androidx.lifecycle.** { *; }
 -dontwarn androidx.lifecycle.**
+
+# Keep RootEncoder / RTSP-Server library
+-keep class com.pedro.** { *; }
+-keep interface com.pedro.** { *; }
+-dontwarn com.pedro.**
+
+# Keep Guava's ListenableFuture (used by CameraX ProcessCameraProvider.getInstance())
+-keep class com.google.common.util.concurrent.ListenableFuture { *; }
+-dontwarn com.google.common.**
