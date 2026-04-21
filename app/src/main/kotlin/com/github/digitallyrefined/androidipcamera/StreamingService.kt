@@ -20,7 +20,6 @@ import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
-import android.util.Range
 import android.util.Size
 import android.widget.Toast
 import androidx.camera.camera2.interop.Camera2CameraInfo
@@ -448,7 +447,6 @@ class StreamingService : LifecycleService() {
             imageAnalyzer = ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
-                .setTargetFrameRate(Range(30, 30))
                 .apply {
                     val prefs = PreferenceManager.getDefaultSharedPreferences(this@StreamingService)
                     val quality = prefs.getString("camera_resolution", "low") ?: "low"
