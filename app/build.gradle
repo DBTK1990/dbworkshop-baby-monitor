@@ -116,5 +116,10 @@ dependencies {
     implementation 'org.bouncycastle:bcprov-jdk15on:1.70'
     implementation 'org.bouncycastle:bcpkix-jdk15on:1.70'
 
+    // RTSP server — replaces custom RTSP implementation in StreamingServerHelper
+    implementation 'com.github.pedroSG94:RTSP-Server:1.4.1'
+    implementation 'com.github.pedroSG94.RootEncoder:library:2.7.2'
+    implementation 'com.github.pedroSG94.RootEncoder:extra-sources:2.7.2'
+
 }
 

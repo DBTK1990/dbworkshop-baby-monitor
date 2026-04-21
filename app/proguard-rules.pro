@@ -68,3 +68,8 @@
 # Keep Lifecycle classes
 -keep class androidx.lifecycle.** { *; }
 -dontwarn androidx.lifecycle.**
+
+# Keep RootEncoder / RTSP-Server library
+-keep class com.pedro.** { *; }
+-keep interface com.pedro.** { *; }
+-dontwarn com.pedro.**

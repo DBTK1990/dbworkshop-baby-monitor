@@ -3,7 +3,6 @@ package com.github.digitallyrefined.androidipcamera.helpers
 import android.content.Context
 import android.Manifest
 import android.content.pm.PackageManager
-import android.graphics.BitmapFactory
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
@@ -29,10 +28,8 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.io.PrintWriter
 import java.net.InetAddress
-import java.net.URI
 import java.net.ServerSocket
 import java.net.Socket
-import java.net.URLDecoder
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.KeyStore
@@ -46,7 +43,6 @@ import javax.net.ssl.SSLServerSocket
 class StreamingServerHelper(
     private val context: Context,
     private val streamPort: Int = 4444,
-    private val rtspPort: Int = 8554,
     private val maxClients: Int = 3,
     private val maxAuthenticatedClients: Int = 10, // Higher limit for authenticated users
     private val onLog: (String) -> Unit = {},
@@ -68,25 +64,11 @@ class StreamingServerHelper(
         var blockedUntil: Long = 0L
     )
 
-    private data class RtspClient(
-        val sessionId: String,
-        val socket: Socket,
-        val outputStream: OutputStream,
-        val rtpChannel: Int,
-        val rtcpChannel: Int,
-        val ssrc: Int,
-        var sequenceNumber: Int = 0,
-        var isPlaying: Boolean = false
-    )
-
     private var serverSocket: ServerSocket? = null
     private var serverJob: Job? = null
-    private var rtspServerSocket: ServerSocket? = null
-    private var rtspServerJob: Job? = null
     @Volatile
     private var isStarting = false
     private val clients = CopyOnWriteArrayList<Client>()
-    private val rtspClients = ConcurrentHashMap<String, RtspClient>()
     private val failedAttempts = ConcurrentHashMap<String, FailedAttempt>()
     @Volatile
     private var appInForeground: Boolean = true
@@ -101,22 +83,10 @@ class StreamingServerHelper(
     private val MAX_AUTHENTICATED_CONNECTION_DURATION_MS = 24 * 60 * 60 * 1000L // 24 hours for authenticated users
     private val CONNECTION_READ_TIMEOUT_MS = 30 * 1000 // 30 seconds read timeout
     private val SOCKET_TIMEOUT_MS = 60 * 1000 // 60 seconds socket timeout
-    private val RTP_PAYLOAD_TYPE_JPEG = 26
-    private val RTP_CLOCK_RATE = 90000
-    private val RTP_MAX_PACKET_SIZE = 1400
-    private val RTP_FIXED_HEADER_SIZE = 12
-    private val RTP_JPEG_HEADER_SIZE = 8
-    private val RTP_JPEG_OVERHEAD = RTP_FIXED_HEADER_SIZE + RTP_JPEG_HEADER_SIZE
-    private val DEFAULT_JPEG_WIDTH = 640
-    private val DEFAULT_JPEG_HEIGHT = 480
-    private val JPEG_TYPE_BASELINE_DCT = 0x01
-    private val JPEG_QUALITY_FACTOR = 75
-    private val RTSP_SESSION_TIMEOUT_SECONDS = 60
-    private val RTSP_SERVER_VERSION = "AndroidIPCamera/1.0"
     private val random = SecureRandom()
 
     fun getClients(): List<Client> = clients.toList()
-    fun hasAnyStreamingClients(): Boolean = clients.isNotEmpty() || rtspClients.values.any { it.isPlaying }
+    fun hasAnyStreamingClients(): Boolean = clients.isNotEmpty()
 
     private fun isRateLimited(clientIp: String): Boolean {
         val now = System.currentTimeMillis()
@@ -175,37 +145,24 @@ class StreamingServerHelper(
         // This must be done to avoid cancelling the new job
         val oldJob: Job?
         val oldSocket: ServerSocket?
-        val oldRtspJob: Job?
-        val oldRtspSocket: ServerSocket?
         synchronized(this) {
             oldJob = serverJob
             oldSocket = serverSocket
-            oldRtspJob = rtspServerJob
-            oldRtspSocket = rtspServerSocket
             serverJob = null
             serverSocket = null
-            rtspServerJob = null
-            rtspServerSocket = null
         }
 
         // Stop old server and wait for it to fully stop (if it exists)
-        if (oldJob != null || oldSocket != null || oldRtspJob != null || oldRtspSocket != null) {
+        if (oldJob != null || oldSocket != null) {
             runBlocking(Dispatchers.IO) {
                 try {
                     oldSocket?.close()
                 } catch (e: IOException) {
                     onLog("Error closing old server socket: ${e.message}")
                 }
-                try {
-                    oldRtspSocket?.close()
-                } catch (e: IOException) {
-                    onLog("Error closing old RTSP server socket: ${e.message}")
-                }
                 oldJob?.cancel()
-                oldRtspJob?.cancel()
                 try {
                     oldJob?.join()
-                    oldRtspJob?.join()
                 } catch (e: Exception) {
                     // Ignore cancellation exceptions
                 }
@@ -337,7 +294,6 @@ class StreamingServerHelper(
                       return@launch
                   }
                   onLog("Server started on port $streamPort (${if (certificatePath != null) "HTTPS" else "HTTP"})")
-                  startRtspServer()
                   // Clear the starting flag now that server is running
                   synchronized(this@StreamingServerHelper) {
                       isStarting = false
@@ -385,220 +341,6 @@ class StreamingServerHelper(
         }
     }
 
-    private fun startRtspServer() {
-        synchronized(this) {
-            if (rtspServerJob != null && rtspServerSocket != null && !rtspServerSocket!!.isClosed) {
-                return
-            }
-            rtspServerJob = CoroutineScope(Dispatchers.IO).launch {
-                try {
-                    val bindAddress = InetAddress.getByName("0.0.0.0")
-                    rtspServerSocket = ServerSocket(rtspPort, 50, bindAddress).apply {
-                        reuseAddress = true
-                        soTimeout = 30000
-                    }
-                    onLog("RTSP server started on port $rtspPort")
-                    while (isActive && !Thread.currentThread().isInterrupted) {
-                        try {
-                            val socket = rtspServerSocket?.accept() ?: continue
-                            val clientIp = socket.inetAddress.hostAddress
-                            launch(Dispatchers.IO) {
-                                handleRtspClientConnection(socket, clientIp)
-                            }
-                        } catch (e: IOException) {
-                            if (rtspServerSocket == null || rtspServerSocket!!.isClosed) {
-                                onLog("RTSP server socket closed")
-                                break
-                            }
-                        } catch (e: Exception) {
-                            if (rtspServerSocket == null || rtspServerSocket!!.isClosed) {
-                                break
-                            }
-                            onLog("RTSP server loop error: ${e.message}")
-                        }
-                    }
-                } catch (e: Exception) {
-                    onLog("Failed to start RTSP server on port $rtspPort: ${e.message}")
-                }
-            }
-        }
-    }
-
-    private fun handleRtspClientConnection(socket: Socket, clientIp: String) {
-        var sessionId: String? = null
-        try {
-            socket.soTimeout = SOCKET_TIMEOUT_MS
-            val inputStream = socket.getInputStream()
-            val outputStream = socket.getOutputStream()
-
-            while (socket.isConnected && !socket.isClosed) {
-                val requestLine = readHttpLine(inputStream) ?: break
-                if (requestLine.isBlank()) continue
-                val requestParts = requestLine.split(" ")
-                if (requestParts.size < 2) break
-
-                val method = requestParts[0].uppercase()
-                val uri = requestParts[1]
-                val headers = mutableListOf<String>()
-                while (true) {
-                    val line = readHttpLine(inputStream) ?: break
-                    if (line.isEmpty()) break
-                    headers.add(line)
-                }
-
-                val cSeq = headers.find { it.startsWith("CSeq:", ignoreCase = true) }
-                    ?.substringAfter(":")
-                    ?.trim()
-                    ?: "1"
-
-                if (!isRtspAuthenticated(headers, uri, clientIp)) {
-                    sendRtspResponse(
-                        outputStream = outputStream,
-                        statusLine = "RTSP/1.0 401 Unauthorized",
-                        cSeq = cSeq,
-                        headers = mapOf("WWW-Authenticate" to "Basic realm=\"Android IP Camera\"")
-                    )
-                    break
-                }
-
-                when (method) {
-                    "OPTIONS" -> {
-                        sendRtspResponse(
-                            outputStream = outputStream,
-                            statusLine = "RTSP/1.0 200 OK",
-                            cSeq = cSeq,
-                            headers = mapOf("Public" to "OPTIONS, DESCRIBE, SETUP, PLAY, TEARDOWN, GET_PARAMETER, GET")
-                        )
-                    }
-                    "DESCRIBE" -> {
-                        if (!isRtspStreamUri(uri)) {
-                            sendRtspResponse(outputStream, "RTSP/1.0 404 Not Found", cSeq)
-                            continue
-                        }
-                        val sdp = buildRtspSdp(uri)
-                        sendRtspResponse(
-                            outputStream = outputStream,
-                            statusLine = "RTSP/1.0 200 OK",
-                            cSeq = cSeq,
-                            headers = mapOf(
-                                "Content-Base" to "$uri/",
-                                "Content-Type" to "application/sdp"
-                            ),
-                            body = sdp
-                        )
-                    }
-                    "SETUP" -> {
-                        if (!isRtspStreamUri(uri)) {
-                            sendRtspResponse(outputStream, "RTSP/1.0 404 Not Found", cSeq)
-                            continue
-                        }
-                        val transportHeader = headers.find { it.startsWith("Transport:", ignoreCase = true) }
-                            ?.substringAfter(":")
-                            ?.trim()
-                            ?: ""
-                        if (!transportHeader.contains("RTP/AVP/TCP", ignoreCase = true)) {
-                            sendRtspResponse(outputStream, "RTSP/1.0 461 Unsupported Transport", cSeq)
-                            continue
-                        }
-                        val (rtpChannel, rtcpChannel) = parseInterleavedChannels(transportHeader)
-                        val currentSessionId = sessionId ?: java.util.UUID.randomUUID().toString()
-                        val existingSession = rtspClients[currentSessionId]
-                        val client = RtspClient(
-                            sessionId = currentSessionId,
-                            socket = socket,
-                            outputStream = outputStream,
-                            rtpChannel = rtpChannel,
-                            rtcpChannel = rtcpChannel,
-                            ssrc = existingSession?.ssrc ?: (random.nextInt() and Int.MAX_VALUE),
-                            sequenceNumber = existingSession?.sequenceNumber ?: 0
-                        )
-                        rtspClients[currentSessionId] = client
-                        sessionId = currentSessionId
-                        sendRtspResponse(
-                            outputStream = outputStream,
-                            statusLine = "RTSP/1.0 200 OK",
-                            cSeq = cSeq,
-                            headers = mapOf(
-                                "Transport" to "RTP/AVP/TCP;unicast;interleaved=$rtpChannel-$rtcpChannel;ssrc=${client.ssrc.toUInt().toString(16)}",
-                                "Session" to "$currentSessionId;timeout=$RTSP_SESSION_TIMEOUT_SECONDS"
-                            )
-                        )
-                    }
-                    "PLAY" -> {
-                        val playSession = headers.find { it.startsWith("Session:", ignoreCase = true) }
-                            ?.substringAfter(":")
-                            ?.trim()
-                            ?.substringBefore(";")
-                            ?: sessionId
-                        val client = playSession?.let { rtspClients[it] }
-                        if (client == null) {
-                            sendRtspResponse(outputStream, "RTSP/1.0 454 Session Not Found", cSeq)
-                            continue
-                        }
-                        val wasPlaying = client.isPlaying
-                        client.isPlaying = true
-                        sessionId = client.sessionId
-                        sendRtspResponse(
-                            outputStream = outputStream,
-                            statusLine = "RTSP/1.0 200 OK",
-                            cSeq = cSeq,
-                            headers = mapOf(
-                                "Session" to client.sessionId,
-                                "RTP-Info" to "url=$uri;seq=${client.sequenceNumber};rtptime=${currentRtpTimestamp()}"
-                            )
-                        )
-                        if (!wasPlaying) {
-                            onClientConnected()
-                        }
-                    }
-                    "GET", "GET_PARAMETER" -> {
-                        sendRtspResponse(
-                            outputStream = outputStream,
-                            statusLine = "RTSP/1.0 200 OK",
-                            cSeq = cSeq,
-                            headers = sessionId?.let { mapOf("Session" to it) } ?: emptyMap()
-                        )
-                    }
-                    "TEARDOWN" -> {
-                        val teardownSession = headers.find { it.startsWith("Session:", ignoreCase = true) }
-                            ?.substringAfter(":")
-                            ?.trim()
-                            ?.substringBefore(";")
-                            ?: sessionId
-                        teardownSession?.let { rtspClients.remove(it) }
-                        sendRtspResponse(
-                            outputStream = outputStream,
-                            statusLine = "RTSP/1.0 200 OK",
-                            cSeq = cSeq
-                        )
-                        break
-                    }
-                    else -> {
-                        sendRtspResponse(
-                            outputStream = outputStream,
-                            statusLine = "RTSP/1.0 405 Method Not Allowed",
-                            cSeq = cSeq,
-                            headers = mapOf("Allow" to "OPTIONS, DESCRIBE, SETUP, PLAY, TEARDOWN, GET_PARAMETER, GET")
-                        )
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            onLog("RTSP client error from $clientIp: ${e.message}")
-        } finally {
-            sessionId?.let {
-                val wasPlaying = rtspClients.remove(it)?.isPlaying == true
-                if (wasPlaying && !hasAnyStreamingClients()) {
-                    onClientDisconnected()
-                }
-            }
-            try {
-                socket.close()
-            } catch (_: Exception) {
-            }
-        }
-    }
-
     fun broadcastFrame(jpegBytes: ByteArray) {
         clients.let { clientsList ->
             val toRemove = mutableListOf<Client>()
@@ -620,245 +362,6 @@ class StreamingServerHelper(
             }
             toRemove.forEach { removeClient(it) }
         }
-        sendRtspJpegFrame(jpegBytes)
-    }
-
-    private fun isRtspAuthenticated(headers: List<String>, requestUri: String, clientIp: String): Boolean {
-        val secureStorage = SecureStorage(context)
-        val rawUsername = secureStorage.getSecureString(SecureStorage.KEY_USERNAME, "") ?: ""
-        val rawPassword = secureStorage.getSecureString(SecureStorage.KEY_PASSWORD, "") ?: ""
-        val username = rawUsername.trim()
-        val password = rawPassword
-        if (!InputValidator.isValidUsername(username) || !InputValidator.isValidPassword(password)) {
-            recordFailedAttempt(clientIp)
-            onLog("SECURITY: RTSP connection rejected - credentials not configured")
-            return false
-        }
-
-        val authValue = headers.find { it.startsWith("Authorization:", ignoreCase = true) }
-            ?.substringAfter(":")
-            ?.trim()
-        val decodedAuth = when {
-            authValue != null && authValue.startsWith("Basic ", ignoreCase = true) -> {
-                try {
-                    String(Base64.decode(authValue.substringAfter("Basic ", ""), Base64.DEFAULT))
-                } catch (_: Exception) {
-                    recordFailedAttempt(clientIp)
-                    return false
-                }
-            }
-            authValue != null -> {
-                recordFailedAttempt(clientIp)
-                return false
-            }
-            else -> parseRtspUriUserInfo(requestUri) ?: return false
-        }
-        val valid = decodedAuth == "$username:$password"
-        if (!valid) {
-            recordFailedAttempt(clientIp)
-            onLog("SECURITY: Failed RTSP auth attempt from $clientIp")
-        }
-        return valid
-    }
-
-    private fun parseRtspUriUserInfo(requestUri: String): String? {
-        if (!requestUri.startsWith("rtsp://", ignoreCase = true)) {
-            return null
-        }
-        return try {
-            val userInfo = URI(requestUri).userInfo ?: return null
-            if (!userInfo.contains(":")) return null
-
-            val uriUsername = URLDecoder.decode(userInfo.substringBefore(":"), Charsets.UTF_8.name()).trim()
-            val uriPassword = URLDecoder.decode(userInfo.substringAfter(":", ""), Charsets.UTF_8.name())
-            if (uriPassword.isEmpty()) return null
-            if (!InputValidator.isValidUsername(uriUsername) || !InputValidator.isValidPassword(uriPassword)) {
-                return null
-            }
-            "$uriUsername:$uriPassword"
-        } catch (_: Exception) {
-            onLog("SECURITY: Rejected malformed RTSP URI credentials")
-            null
-        }
-    }
-
-    private fun sendRtspResponse(
-        outputStream: OutputStream,
-        statusLine: String,
-        cSeq: String,
-        headers: Map<String, String> = emptyMap(),
-        body: String? = null
-    ) {
-        val bodyBytes = body?.toByteArray(Charsets.UTF_8)
-        val response = StringBuilder().apply {
-            append(statusLine).append("\r\n")
-            append("CSeq: ").append(cSeq).append("\r\n")
-            append("Server: $RTSP_SERVER_VERSION\r\n")
-            headers.forEach { (key, value) ->
-                append(key).append(": ").append(value).append("\r\n")
-            }
-            if (bodyBytes != null) {
-                append("Content-Length: ").append(bodyBytes.size).append("\r\n")
-            }
-            append("\r\n")
-        }.toString().toByteArray(Charsets.UTF_8)
-        outputStream.write(response)
-        if (bodyBytes != null) {
-            outputStream.write(bodyBytes)
-        }
-        outputStream.flush()
-    }
-
-    private fun parseInterleavedChannels(transportHeader: String): Pair<Int, Int> {
-        val interleaved = transportHeader
-            .split(";")
-            .map { it.trim() }
-            .firstOrNull { it.startsWith("interleaved=", ignoreCase = true) }
-            ?.substringAfter("=")
-            ?.split("-")
-            ?.mapNotNull { it.toIntOrNull() }
-        return if (interleaved != null && interleaved.size == 2) {
-            interleaved[0] to interleaved[1]
-        } else {
-            0 to 1
-        }
-    }
-
-    private fun isRtspStreamUri(uri: String): Boolean {
-        val path = if (uri.startsWith("rtsp://", ignoreCase = true)) {
-            val slashIndex = uri.indexOf('/', startIndex = 7)
-            if (slashIndex == -1) "/" else uri.substring(slashIndex)
-        } else {
-            uri
-        }
-        return path.startsWith("/stream")
-    }
-
-    private fun buildRtspSdp(uri: String): String {
-        val normalizedUri = uri.substringBefore("?")
-        return """
-v=0
-o=- 0 0 IN IP4 0.0.0.0
-s=Android IP Camera
-t=0 0
-a=control:*
-m=video 0 RTP/AVP $RTP_PAYLOAD_TYPE_JPEG
-a=rtpmap:$RTP_PAYLOAD_TYPE_JPEG JPEG/$RTP_CLOCK_RATE
-a=control:$normalizedUri
-        """.trimIndent() + "\r\n"
-    }
-
-    private fun sendRtspJpegFrame(jpegBytes: ByteArray) {
-        val playingClients = rtspClients.values.filter { it.isPlaying }
-        if (playingClients.isEmpty()) {
-            return
-        }
-
-        val dimensions = getJpegDimensions(jpegBytes)
-        val widthBlocks = ((dimensions.first + 7) / 8).coerceIn(0, 255)
-        val heightBlocks = ((dimensions.second + 7) / 8).coerceIn(0, 255)
-        val timestamp = currentRtpTimestamp()
-        val maxPayload = RTP_MAX_PACKET_SIZE - RTP_JPEG_OVERHEAD
-        val clientsToRemove = mutableListOf<String>()
-
-        playingClients.forEach { client ->
-            try {
-                var offset = 0
-                while (offset < jpegBytes.size) {
-                    val fragmentLength = minOf(maxPayload, jpegBytes.size - offset)
-                    val marker = offset + fragmentLength >= jpegBytes.size
-                    val packet = buildRtpJpegPacket(
-                        jpegBytes = jpegBytes,
-                        offset = offset,
-                        length = fragmentLength,
-                        marker = marker,
-                        sequenceNumber = client.sequenceNumber,
-                        timestamp = timestamp,
-                        ssrc = client.ssrc,
-                        widthBlocks = widthBlocks,
-                        heightBlocks = heightBlocks
-                    )
-                    sendInterleavedPacket(client.outputStream, client.rtpChannel, packet)
-                    client.sequenceNumber = (client.sequenceNumber + 1) and 0xFFFF
-                    offset += fragmentLength
-                }
-            } catch (e: Exception) {
-                clientsToRemove.add(client.sessionId)
-            }
-        }
-
-        clientsToRemove.forEach { session ->
-            val removed = rtspClients.remove(session)
-            try {
-                removed?.socket?.close()
-            } catch (_: Exception) {
-            }
-            if (removed?.isPlaying == true && !hasAnyStreamingClients()) {
-                onClientDisconnected()
-            }
-        }
-    }
-
-    private fun buildRtpJpegPacket(
-        jpegBytes: ByteArray,
-        offset: Int,
-        length: Int,
-        marker: Boolean,
-        sequenceNumber: Int,
-        timestamp: Int,
-        ssrc: Int,
-        widthBlocks: Int,
-        heightBlocks: Int
-    ): ByteArray {
-        val packet = ByteArray(RTP_JPEG_OVERHEAD + length)
-        packet[0] = 0x80.toByte()
-        packet[1] = (((if (marker) 0x80 else 0x00) or RTP_PAYLOAD_TYPE_JPEG)).toByte()
-        packet[2] = ((sequenceNumber shr 8) and 0xFF).toByte()
-        packet[3] = (sequenceNumber and 0xFF).toByte()
-        packet[4] = ((timestamp shr 24) and 0xFF).toByte()
-        packet[5] = ((timestamp shr 16) and 0xFF).toByte()
-        packet[6] = ((timestamp shr 8) and 0xFF).toByte()
-        packet[7] = (timestamp and 0xFF).toByte()
-        packet[8] = ((ssrc shr 24) and 0xFF).toByte()
-        packet[9] = ((ssrc shr 16) and 0xFF).toByte()
-        packet[10] = ((ssrc shr 8) and 0xFF).toByte()
-        packet[11] = (ssrc and 0xFF).toByte()
-        packet[12] = 0x00
-        packet[13] = ((offset shr 16) and 0xFF).toByte()
-        packet[14] = ((offset shr 8) and 0xFF).toByte()
-        packet[15] = (offset and 0xFF).toByte()
-        packet[16] = JPEG_TYPE_BASELINE_DCT.toByte()
-        packet[17] = JPEG_QUALITY_FACTOR.toByte()
-        packet[18] = widthBlocks.toByte()
-        packet[19] = heightBlocks.toByte()
-        System.arraycopy(jpegBytes, offset, packet, 20, length)
-        return packet
-    }
-
-    private fun sendInterleavedPacket(outputStream: OutputStream, channel: Int, packet: ByteArray) {
-        val length = packet.size
-        outputStream.write(byteArrayOf(
-            '$'.code.toByte(),
-            channel.toByte(),
-            ((length shr 8) and 0xFF).toByte(),
-            (length and 0xFF).toByte()
-        ))
-        outputStream.write(packet)
-        outputStream.flush()
-    }
-
-    private fun getJpegDimensions(jpegBytes: ByteArray): Pair<Int, Int> {
-        val options = BitmapFactory.Options().apply {
-            inJustDecodeBounds = true
-        }
-        BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size, options)
-        val width = if (options.outWidth > 0) options.outWidth else DEFAULT_JPEG_WIDTH
-        val height = if (options.outHeight > 0) options.outHeight else DEFAULT_JPEG_HEIGHT
-        return width to height
-    }
-
-    private fun currentRtpTimestamp(): Int {
-        return (System.nanoTime() * RTP_CLOCK_RATE / 1_000_000_000L).toInt()
     }
 
     private suspend fun handleClientConnection(socket: Socket, clientIp: String) {
@@ -1293,61 +796,39 @@ a=control:$normalizedUri
     suspend fun stopStreamingServer() {
         val jobToCancel: Job?
         val socketToClose: ServerSocket?
-        val rtspJobToCancel: Job?
-        val rtspSocketToClose: ServerSocket?
 
         synchronized(this) {
-            // Get references to close outside synchronized block
             jobToCancel = serverJob
             socketToClose = serverSocket
-            rtspJobToCancel = rtspServerJob
-            rtspSocketToClose = rtspServerSocket
             serverSocket = null
             serverJob = null
-            rtspServerSocket = null
-            rtspServerJob = null
         }
 
-        // If there's nothing to stop, return immediately
-        if (jobToCancel == null && socketToClose == null && rtspJobToCancel == null && rtspSocketToClose == null) {
+        if (jobToCancel == null && socketToClose == null) {
             return
         }
 
-        // Run socket closing operations on background thread to avoid NetworkOnMainThreadException
         withContext(Dispatchers.IO) {
-            // Close the server socket first to interrupt any blocking accept() calls
             try {
                 socketToClose?.close()
             } catch (e: IOException) {
                 onLog("Error closing server socket: ${e.message}")
             }
-            try {
-                rtspSocketToClose?.close()
-            } catch (e: IOException) {
-                onLog("Error closing RTSP server socket: ${e.message}")
-            }
 
-            // Cancel the server coroutine and wait for it to finish
             jobToCancel?.cancel()
-            rtspJobToCancel?.cancel()
             try {
-                // Wait for the coroutine to finish
                 jobToCancel?.join()
-                rtspJobToCancel?.join()
             } catch (e: Exception) {
                 onLog("Error waiting for server job: ${e.message}")
             }
 
-            // Close all client connections (this involves network operations)
             closeClientConnection()
 
-            // Wait a bit longer to ensure port is fully released
             try {
                 Thread.sleep(300)
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
             }
-
         }
     }
 
@@ -1359,18 +840,8 @@ a=control:$normalizedUri
                 onLog("Error closing client connection: ${e.message}")
             }
         }
-        rtspClients.values.forEach { client ->
-            try {
-                client.socket.close()
-            } catch (e: IOException) {
-                onLog("Error closing RTSP client connection: ${e.message}")
-            }
-        }
         clients.clear()
-        rtspClients.clear()
-        if (!hasAnyStreamingClients()) {
-            onClientDisconnected()
-        }
+        onClientDisconnected()
     }
 
     fun removeClient(client: Client) {
