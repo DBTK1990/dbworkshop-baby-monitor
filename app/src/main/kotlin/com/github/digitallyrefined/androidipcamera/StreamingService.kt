@@ -153,7 +153,7 @@ class StreamingService : LifecycleService() {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             val filter = IntentFilter(NotificationManager.ACTION_NOTIFICATION_CHANNEL_BLOCK_STATE_CHANGED)
-            registerReceiver(notificationChannelReceiver, filter)
+            ContextCompat.registerReceiver(this, notificationChannelReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startNotificationChannelCheckFallback()
         }
@@ -228,8 +228,10 @@ class StreamingService : LifecycleService() {
             .setOngoing(true)
             .build()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA)
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
