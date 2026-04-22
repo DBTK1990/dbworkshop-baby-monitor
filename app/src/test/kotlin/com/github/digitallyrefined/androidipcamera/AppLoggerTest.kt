@@ -30,11 +30,11 @@ class AppLoggerTest {
 
     @Before
     fun clearLogger() {
-        // Drain any leftover entries from previous tests by logging a sentinel
-        // and then waiting — AppLogger is a singleton so state persists between tests.
-        // We call getEntries() to obtain a copy, then compare sizes at test start.
-        // Full clear is not exposed, but MAX_ENTRIES overflow rolls it; for isolated
-        // tests we rely on the fact that each test checks its own entries by index.
+        // AppLogger is a singleton whose internal buffer persists across tests.
+        // Overflow the buffer so it rolls over, giving every subsequent test a clean slate
+        // relative to the entries it appended.  Each test captures `size` before writing
+        // and uses `last()` / `size + N` indices, so this is sufficient isolation.
+        repeat(AppLogger.MAX_ENTRIES + 1) { AppLogger.d("TestSetup", "flush") }
     }
 
     // ── entry storage ─────────────────────────────────────────────────────────

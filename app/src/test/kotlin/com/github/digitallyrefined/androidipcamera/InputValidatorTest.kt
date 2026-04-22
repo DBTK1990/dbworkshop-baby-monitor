@@ -156,11 +156,11 @@ class InputValidatorTest {
     }
 
     @Test
-    fun `username with html characters is sanitized then rejected`() {
-        // After stripping < > " ' &  the result is "scriptscript" which is still valid,
-        // so we verify the dangerous characters are removed.
+    fun `username with html characters is sanitized and accepted`() {
+        // After stripping < and > the result is "script" — 6 alphanumeric chars — which
+        // is a valid username.  The point of this test is to verify that sanitizeString()
+        // removes the dangerous characters before validation runs.
         val result = InputValidator.validateAndSanitizeUsername("<script>")
-        // sanitizeString removes < and > → "script" is 6 chars, alphanumeric — valid
         assertNotNull(result)
         assertEquals("script", result)
     }
