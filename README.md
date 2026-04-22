@@ -22,7 +22,7 @@ alt="Get it on Obtainium" align="center" height="54" /></a>
 ## Features
 
 - 🌎 Built in server, just open the video stream in a web browser, video app or even set it as a Home Assistant MJPEG IP Camera (using `https://<ip_address>:4444/stream`)
-- 📡 RTSP endpoint with RTP-over-TCP transport for clients that require `rtsp://` (using `rtsp://<username>:<password>@<ip_address>:8554/stream`)
+- 📡 RTSP endpoint with RTP-over-TCP transport for clients that require `rtsp://` (using `rtsp://<username>:<password>@<ip_address>:8554/`)
 - 📴 Option to turn the display off while streaming
 - 🤳 Switch between the main or selfie camera
 - 🎛️ Remote web interface with controls for camera section, image rotation, audio/video sync, flash light toggle, resolution, zoom, exposure and contrast

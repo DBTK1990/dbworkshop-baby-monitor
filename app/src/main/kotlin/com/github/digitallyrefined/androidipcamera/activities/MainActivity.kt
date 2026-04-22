@@ -160,7 +160,7 @@ class MainActivity : AppCompatActivity() {
 
         val ipAddressText = findViewById<TextView>(R.id.ipAddressText)
         val ipAddress = getLocalIpAddress()
-        ipAddressText.text = "https://$ipAddress:$STREAM_PORT\nrtsp://<username>:<password>@$ipAddress:$RTSP_PORT/stream"
+        ipAddressText.text = "https://$ipAddress:$STREAM_PORT\nrtsp://<username>:<password>@$ipAddress:$RTSP_PORT/"
         showNoClientMessage(true)
 
         findViewById<ImageButton>(R.id.settingsButton).setOnClickListener {
@@ -460,4 +460,3 @@ class MainActivity : AppCompatActivity() {
         private val OPTIONAL_PERMISSIONS = arrayOf(Manifest.permission.RECORD_AUDIO)
     }
 }
-
