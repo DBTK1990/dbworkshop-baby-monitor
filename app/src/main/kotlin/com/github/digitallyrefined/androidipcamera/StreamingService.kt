@@ -558,7 +558,7 @@ class StreamingService : LifecycleService() {
         return backCameras.getOrNull(backCameras.size / 2)?.first ?: "0"
     }
 
-    @OptIn(ExperimentalCamera2Interop::class)
+    @androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
     private fun buildMainBackCameraSelector(cameraManager: CameraManager): CameraSelector {
         val mainId = getMainBackCameraId(cameraManager)
         return CameraSelector.Builder()
