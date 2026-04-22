@@ -256,7 +256,7 @@ class StreamingService : LifecycleService() {
     }
 
     fun isCameraRunning(): Boolean {
-        return camera != null
+        return camera != null || cameraXSource?.isRunning() == true
     }
 
     fun getLocalIpAddress(): String {
@@ -288,6 +288,8 @@ class StreamingService : LifecycleService() {
             )
             .apply()
         cameraResolutionHelper = null
+        // Sync RTSP's CameraXSource to the new facing
+        cameraXSource?.switchCamera()
         if (streamingServerHelper?.getClients()?.isNotEmpty() == true) {
             startCamera()
         }
@@ -780,9 +782,12 @@ class StreamingService : LifecycleService() {
             server.getStreamClient().setClientListener(object : ClientListener {
                 override fun onClientConnected(client: ServerClient) {
                     AppLogger.i(TAG, "RTSP client connected")
+                    // CameraXSource manages its own camera lifecycle via server.startStream().
+                    // Do NOT call startCamera() here — binding a second LifecycleOwner to the
+                    // same camera while CameraXSource already has Preview bound causes CameraX
+                    // to reconfigure the session, breaking CameraXSource's video stream.
                     launchMain {
                         onClientConnected?.invoke()
-                        startCameraIfNeeded()
                     }
                 }
                 override fun onClientDisconnected(client: ServerClient) {
@@ -822,6 +827,13 @@ class StreamingService : LifecycleService() {
                 AppLogger.w(TAG, "RTSP audio disabled: RECORD_AUDIO permission not granted")
             }
             server.startStream()
+            // CameraXSource defaults to LENS_FACING_BACK (see CameraXSource source).
+            // switchCamera() flips the facing and restarts the capture, so calling it
+            // once after startStream() corrects the facing when front camera is active.
+            // It requires the stream to already be running (surfaceTexture must be set).
+            if (lensFacing == CameraSelector.DEFAULT_FRONT_CAMERA) {
+                source.switchCamera()
+            }
             AppLogger.i(TAG, "RTSP server listening on port $RTSP_PORT")
         } catch (e: Exception) {
             AppLogger.e(TAG, "Error starting RTSP stream", e)
