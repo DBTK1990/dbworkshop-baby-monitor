@@ -22,6 +22,8 @@ import android.os.IBinder
 import android.util.Log
 import android.util.Size
 import android.widget.Toast
+import androidx.camera.camera2.interop.Camera2CameraInfo
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
@@ -151,7 +153,7 @@ class StreamingService : LifecycleService() {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             val filter = IntentFilter(NotificationManager.ACTION_NOTIFICATION_CHANNEL_BLOCK_STATE_CHANGED)
-            registerReceiver(notificationChannelReceiver, filter)
+            ContextCompat.registerReceiver(this, notificationChannelReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startNotificationChannelCheckFallback()
         }
@@ -226,8 +228,10 @@ class StreamingService : LifecycleService() {
             .setOngoing(true)
             .build()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA)
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
@@ -412,7 +416,13 @@ class StreamingService : LifecycleService() {
     }
 
     private fun stopCamera() {
-        cameraProvider?.unbindAll()
+        if (cameraXSource != null) {
+            // Only unbind our ImageAnalysis use case — do NOT call unbindAll() which
+            // would also tear down CameraXSource's Preview binding and starve the RTSP encoder.
+            imageAnalyzer?.let { cameraProvider?.unbind(it) }
+        } else {
+            cameraProvider?.unbindAll()
+        }
         imageAnalyzer = null
         camera = null
     }
@@ -425,9 +435,9 @@ class StreamingService : LifecycleService() {
             this.cameraProvider = cameraProvider
 
             // Initialize camera resolution helper if not already done
+            val cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
             if (cameraResolutionHelper == null) {
                 cameraResolutionHelper = CameraResolutionHelper(this)
-                val cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
                 val cameraId = getCameraId(cameraManager)
                 cameraResolutionHelper?.initializeResolutions(cameraId)
             }
@@ -496,10 +506,19 @@ class StreamingService : LifecycleService() {
                     useCases.add(preview)
                 }
 
+                // Resolve the specific camera: for back-facing, pick the main lens by focal
+                // length (median) so CameraX doesn't default to the ultrawide on multi-camera
+                // devices. Front camera keeps DEFAULT_FRONT_CAMERA as-is.
+                val cameraSelector = if (lensFacing == CameraSelector.DEFAULT_BACK_CAMERA) {
+                    buildMainBackCameraSelector(cameraManager)
+                } else {
+                    lensFacing
+                }
+
                 // Bind to Service Lifecycle
                 camera = cameraProvider.bindToLifecycle(
                     this,
-                    lensFacing,
+                    cameraSelector,
                     *useCases.toTypedArray()
                 )
 
@@ -515,12 +534,7 @@ class StreamingService : LifecycleService() {
 
     private fun getCameraId(cameraManager: CameraManager): String {
         return when (lensFacing) {
-            CameraSelector.DEFAULT_BACK_CAMERA -> {
-                cameraManager.cameraIdList.find { id ->
-                    val characteristics = cameraManager.getCameraCharacteristics(id)
-                    characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
-                } ?: "0"
-            }
+            CameraSelector.DEFAULT_BACK_CAMERA -> getMainBackCameraId(cameraManager)
             CameraSelector.DEFAULT_FRONT_CAMERA -> {
                 cameraManager.cameraIdList.find { id ->
                     val characteristics = cameraManager.getCameraCharacteristics(id)
@@ -529,6 +543,30 @@ class StreamingService : LifecycleService() {
             }
             else -> "0"
         }
+    }
+
+    // Returns the camera ID of the main (non-ultrawide, non-telephoto) back lens.
+    // Sorts back-facing cameras by max focal length ascending: ultrawide has the shortest
+    // focal length, telephoto the longest. The median entry is the regular 1x lens.
+    private fun getMainBackCameraId(cameraManager: CameraManager): String {
+        val backCameras = cameraManager.cameraIdList.mapNotNull { id ->
+            val chars = cameraManager.getCameraCharacteristics(id)
+            if (chars.get(CameraCharacteristics.LENS_FACING) != CameraCharacteristics.LENS_FACING_BACK) return@mapNotNull null
+            val focal = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.maxOrNull() ?: 0f
+            id to focal
+        }.sortedBy { it.second }
+        return backCameras.getOrNull(backCameras.size / 2)?.first ?: "0"
+    }
+
+    @androidx.annotation.OptIn(ExperimentalCamera2Interop::class)
+    private fun buildMainBackCameraSelector(cameraManager: CameraManager): CameraSelector {
+        val mainId = getMainBackCameraId(cameraManager)
+        return CameraSelector.Builder()
+            .addCameraFilter { cameraInfos ->
+                cameraInfos.filter { Camera2CameraInfo.from(it).cameraId == mainId }
+                    .ifEmpty { cameraInfos }
+            }
+            .build()
     }
 
     private fun applyCameraSettings() {
@@ -742,20 +780,31 @@ class StreamingService : LifecycleService() {
             server.getStreamClient().setClientListener(object : ClientListener {
                 override fun onClientConnected(client: ServerClient) {
                     AppLogger.i(TAG, "RTSP client connected")
-                    launchMain { onClientConnected?.invoke() }
+                    launchMain {
+                        onClientConnected?.invoke()
+                        startCameraIfNeeded()
+                    }
                 }
                 override fun onClientDisconnected(client: ServerClient) {
                     AppLogger.i(TAG, "RTSP client disconnected")
                     val hasMjpegClients = streamingServerHelper?.hasAnyStreamingClients() == true
                     val hasRtspClients = server.getStreamClient().getNumClients() > 0
                     if (!hasMjpegClients && !hasRtspClients) {
-                        launchMain { onClientDisconnected?.invoke() }
+                        launchMain {
+                            stopCamera()
+                            onClientDisconnected?.invoke()
+                        }
                     }
                 }
                 override fun onClientNewBitrate(bitrate: Long, client: ServerClient) {}
             })
 
-            val videoPrepared = server.prepareVideo(1280, 720, 2_000_000)
+            val videoPrepared = server.prepareVideo(
+                width = 1280, height = 720,
+                bitrate = 1_500_000,
+                fps = 30,
+                iFrameInterval = 1
+            )
             if (!videoPrepared) {
                 AppLogger.e(TAG, "RTSP server failed to prepare video")
                 safeStopRtspStream("video preparation failure")
